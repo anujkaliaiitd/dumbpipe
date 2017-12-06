@@ -81,16 +81,5 @@ set(HRD_SOURCES
   libhrd_cpp/hrd_conn.cc
   libhrd_cpp/hrd_util.cc)
 
-set(BENCHMARKS
-  rc-swarm
-  rw-tput-receiver
-  rw-tput-sender
-  ud-sender
-  ud-receiver
-  atomics-sequencer
-  sender-scalability)
-
-foreach(bench IN LISTS BENCHMARKS)
-  add_executable(${bench} ${bench}/main.cc ${HRD_SOURCES})
-  target_link_libraries(${bench} ${GTEST_LIBRARIES} ${LIBRARIES})
-endforeach()
+add_executable(ud-receiver main.cc ${HRD_SOURCES})
+target_link_libraries(ud-receiver ${GTEST_LIBRARIES} ${LIBRARIES})
