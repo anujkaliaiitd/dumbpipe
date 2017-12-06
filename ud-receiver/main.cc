@@ -34,8 +34,7 @@ void run_server(thread_params_t* params) {
   dgram_config.buf_shm_key = -1;
 
   auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
-                               nullptr, &dgram_config,
-                               hrd_ignore_overrun_t::kTrue);
+                               &dgram_config, hrd_ignore_overrun_t::kTrue);
 
   // Buffer to receive packets into. Set to zero.
   memset(const_cast<uint8_t*>(cb->dgram_buf), 0, kAppBufSize);
@@ -118,8 +117,8 @@ void run_server(thread_params_t* params) {
 
     rolling_iter += static_cast<size_t>(num_comps);
     if (rolling_iter > 100000) {
-       printf("rolling_iter = %zu\n", rolling_iter);
-       rolling_iter = 0;
+      printf("rolling_iter = %zu\n", rolling_iter);
+      rolling_iter = 0;
     }
     mod_add_one<kAppNumQPs>(qp_i);
   }
@@ -140,7 +139,7 @@ void run_client(thread_params_t* params) {
   dgram_config.buf_shm_key = -1;
 
   auto* cb = hrd_ctrl_blk_init(clt_local_hid, ib_port_index,
-                               kHrdInvalidNUMANode, nullptr, &dgram_config);
+                               kHrdInvalidNUMANode, &dgram_config);
 
   // Buffer to send packets from. Set to a non-zero value.
   memset(const_cast<uint8_t*>(cb->dgram_buf), 1, kAppBufSize);

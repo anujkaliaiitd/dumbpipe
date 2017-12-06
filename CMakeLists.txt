@@ -81,5 +81,5 @@ set(HRD_SOURCES
   libhrd_cpp/hrd_conn.cc
   libhrd_cpp/hrd_util.cc)
 
-add_executable(ud-receiver main.cc ${HRD_SOURCES})
+add_executable(ud-receiver ud-receiver/main.cc ${HRD_SOURCES})
 target_link_libraries(ud-receiver ${GTEST_LIBRARIES} ${LIBRARIES})

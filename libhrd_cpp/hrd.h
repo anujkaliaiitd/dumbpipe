@@ -100,16 +100,6 @@ struct hrd_ctrl_blk_t {
 
   struct ibv_pd* pd;  // A protection domain for this control block
 
-  // Connected QPs
-  bool use_uc;
-  size_t num_conn_qps;
-  struct ibv_qp** conn_qp;
-  struct ibv_cq** conn_cq;
-  volatile uint8_t* conn_buf;  // A buffer for RDMA over RC/UC QPs
-  size_t conn_buf_size;
-  int conn_buf_shm_key;
-  struct ibv_mr* conn_buf_mr;
-
   // Datagram QPs
   size_t num_dgram_qps;
   struct ibv_qp* dgram_qp[kHrdMaxUDQPs];
@@ -122,14 +112,6 @@ struct hrd_ctrl_blk_t {
   uint8_t pad[64];
 };
 
-struct hrd_conn_config_t {
-  size_t num_qps;
-  bool use_uc;
-  volatile uint8_t* prealloc_buf;
-  size_t buf_size;
-  int buf_shm_key;
-};
-
 struct hrd_dgram_config_t {
   size_t num_qps;
   volatile uint8_t* prealloc_buf;
@@ -140,11 +122,10 @@ struct hrd_dgram_config_t {
 enum class hrd_ignore_overrun_t : bool { kTrue, kFalse };
 
 // Major initialzation functions
-hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
-                                  size_t numa_node,
-                                  hrd_conn_config_t* conn_config,
-                                  hrd_dgram_config_t* dgram_config,
-                                  hrd_ignore_overrun_t ignore_overrun = hrd_ignore_overrun_t::kFalse);
+hrd_ctrl_blk_t* hrd_ctrl_blk_init(
+    size_t local_hid, size_t port_index, size_t numa_node,
+    hrd_dgram_config_t* dgram_config,
+    hrd_ignore_overrun_t ignore_overrun = hrd_ignore_overrun_t::kFalse);
 
 int hrd_ctrl_blk_destroy(hrd_ctrl_blk_t* cb);
 
@@ -152,11 +133,7 @@ int hrd_ctrl_blk_destroy(hrd_ctrl_blk_t* cb);
 void hrd_ibv_devinfo(void);
 
 void hrd_resolve_port_index(hrd_ctrl_blk_t* cb, size_t port_index);
-void hrd_create_conn_qps(hrd_ctrl_blk_t* cb);
 void hrd_create_dgram_qps(hrd_ctrl_blk_t* cb);
-
-void hrd_connect_qp(hrd_ctrl_blk_t* cb, size_t conn_qp_idx,
-                    hrd_qp_attr_t* remote_qp_attr);
 
 // Post 1 RECV for this queue pair for this buffer. Low performance.
 void hrd_post_dgram_recv(struct ibv_qp* qp, void* buf_addr, size_t len,

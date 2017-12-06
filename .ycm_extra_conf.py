@@ -36,8 +36,8 @@ import ycm_core
 flags = [
     '-x',
     'c++',
-    '-I', '/home/akalia/rdma_bench/',
-    '-I', '/users/akalia/rdma_bench/',
+    '-I', '/home/akalia/dumbpipe/',
+    '-I', '/users/akalia/dumbpipe/',
     '-Wall',
     '-Werror',
     '-Wextra',
