@@ -1,11 +1,9 @@
 #include "hrd.h"
 
-// If @prealloc_conn_buf != nullptr, @conn_buf_size is the size of the
-// preallocated buffer. If @prealloc_conn_buf == nullptr, @conn_buf_size is the
-// size of the new buffer to create.
 struct hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
                                          size_t numa_node,
                                          hrd_dgram_config_t* dgram_config) {
+  assert(dgram_config->num_qps > 0 && dgram_config->buf_size <= MB(1024));
   hrd_red_printf("HRD: creating control block %zu: port %zu, socket %zu.\n",
                  local_hid, port_index, numa_node);
 
@@ -30,21 +28,12 @@ struct hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
   cb->numa_node = numa_node;
 
   // Datagram QPs
-  if (dgram_config != nullptr) {
-    cb->num_dgram_qps = dgram_config->num_qps;
-    cb->dgram_buf_size = dgram_config->buf_size;
-    cb->dgram_buf_shm_key = dgram_config->buf_shm_key;
+  cb->num_dgram_qps = dgram_config->num_qps;
+  cb->dgram_buf_size = dgram_config->buf_size;
+  cb->dgram_buf_shm_key = dgram_config->buf_shm_key;
+  cb->dgram_ignore_overrun = dgram_config->ignore_overrun;
 
-    assert(cb->dgram_buf_size <= MB(1024));
-    if (dgram_config->prealloc_buf != nullptr) {
-      assert(cb->dgram_buf_shm_key == -1);
-    }
-
-    cb->dgram_ignore_overrun = dgram_config->ignore_overrun;
-  }
-
-  // Resolve the port into cb->resolve
-  hrd_resolve_port_index(cb, port_index);
+  hrd_resolve_port_index(cb, port_index);  // Resolve the port into cb->resolve
 
   cb->pd = ibv_alloc_pd(cb->resolve.ib_ctx);
   assert(cb->pd != nullptr);
@@ -52,42 +41,31 @@ struct hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
   int ib_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                  IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
 
-  // Create datagram QPs and transition them RTS.
-  // Create and register datagram RDMA buffer.
-  if (cb->num_dgram_qps >= 1) {
-    hrd_create_dgram_qps(cb);
+  hrd_create_dgram_qps(cb);  // Create datagram QPs and transition them RTS.
 
-    if (dgram_config->prealloc_buf == nullptr) {
-      // Create and register dgram_buf - always make it multiple of 2 MB
-      size_t reg_size = 0;
+  if (dgram_config->buf_size != 0) {
+    size_t reg_size = 0;
+    if (numa_node != kHrdInvalidNUMANode) {
+      // Hugepages - allocate in multiples of 2 MB
+      while (reg_size < cb->dgram_buf_size) reg_size += MB(2);
 
-      // If numa_node is invalid, use standard heap memory
-      if (numa_node != kHrdInvalidNUMANode) {
-        // Hugepages
-        while (reg_size < cb->dgram_buf_size) reg_size += MB(2);
-
-        // SHM key 0 is hard to free later
-        assert(cb->dgram_buf_shm_key >= 1 && cb->dgram_buf_shm_key <= 128);
-        cb->dgram_buf = reinterpret_cast<volatile uint8_t*>(
-            hrd_malloc_socket(cb->dgram_buf_shm_key, reg_size, numa_node));
-      } else {
-        reg_size = cb->dgram_buf_size;
-        cb->dgram_buf =
-            reinterpret_cast<volatile uint8_t*>(memalign(4096, reg_size));
-      }
-
-      assert(cb->dgram_buf != nullptr);
-      memset(const_cast<uint8_t*>(cb->dgram_buf), 0, reg_size);
-
-      cb->dgram_buf_mr = ibv_reg_mr(cb->pd, const_cast<uint8_t*>(cb->dgram_buf),
-                                    reg_size, ib_flags);
-      assert(cb->dgram_buf_mr != nullptr);
+      // SHM key 0 is hard to free later
+      assert(cb->dgram_buf_shm_key >= 1 && cb->dgram_buf_shm_key <= 128);
+      cb->dgram_buf = reinterpret_cast<volatile uint8_t*>(
+          hrd_malloc_socket(cb->dgram_buf_shm_key, reg_size, numa_node));
     } else {
-      cb->dgram_buf = const_cast<volatile uint8_t*>(dgram_config->prealloc_buf);
-      cb->dgram_buf_mr = ibv_reg_mr(cb->pd, const_cast<uint8_t*>(cb->dgram_buf),
-                                    cb->dgram_buf_size, ib_flags);
-      assert(cb->dgram_buf_mr != nullptr);
+      // If numa_node is invalid, use standard heap memory
+      reg_size = cb->dgram_buf_size;
+      cb->dgram_buf =
+          reinterpret_cast<volatile uint8_t*>(memalign(4096, reg_size));
     }
+
+    assert(cb->dgram_buf != nullptr);
+    memset(const_cast<uint8_t*>(cb->dgram_buf), 0, reg_size);
+
+    cb->dgram_buf_mr = ibv_reg_mr(cb->pd, const_cast<uint8_t*>(cb->dgram_buf),
+                                  reg_size, ib_flags);
+    assert(cb->dgram_buf_mr != nullptr);
   }
 
   return cb;

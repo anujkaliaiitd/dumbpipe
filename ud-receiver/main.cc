@@ -30,7 +30,6 @@ void run_server(thread_params_t* params) {
 
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = kAppNumQPs;
-  dgram_config.prealloc_buf = nullptr;
   dgram_config.buf_size = sizeof(struct ibv_grh) + FLAGS_size;
   dgram_config.buf_shm_key = -1;
   dgram_config.ignore_overrun = kIgnoreOverrun;
@@ -130,7 +129,6 @@ void run_client(thread_params_t* params) {
 
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = 1;
-  dgram_config.prealloc_buf = nullptr;
   dgram_config.buf_size = FLAGS_size * FLAGS_postlist;
   dgram_config.buf_shm_key = -1;
 

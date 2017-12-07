@@ -112,7 +112,6 @@ struct hrd_ctrl_blk_t {
 
 struct hrd_dgram_config_t {
   size_t num_qps;
-  volatile uint8_t* prealloc_buf;
   size_t buf_size;
   int buf_shm_key;
   bool ignore_overrun;
