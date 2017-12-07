@@ -6,7 +6,6 @@
 #include "libhrd_cpp/hrd.h"
 
 static constexpr size_t kAppNumQPs = 1;  // UD QPs used by server for RECVs
-static constexpr size_t kAppBufSize = 4096;
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 static_assert(is_power_of_two(kAppUnsigBatch), "");
@@ -32,15 +31,16 @@ void run_server(thread_params_t* params) {
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = kAppNumQPs;
   dgram_config.prealloc_buf = nullptr;
-  dgram_config.buf_size = kAppBufSize;
+  dgram_config.buf_size = sizeof(struct ibv_grh) + FLAGS_size;
   dgram_config.buf_shm_key = -1;
   dgram_config.ignore_overrun = kIgnoreOverrun;
 
   auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
                                &dgram_config);
+  assert(cb != nullptr);
 
   // Buffer to receive packets into. Set to zero.
-  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, kAppBufSize);
+  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, dgram_config.buf_size);
 
   for (size_t qp_i = 0; qp_i < kAppNumQPs; qp_i++) {
     // Fill this QP with recvs before publishing it to clients
@@ -131,14 +131,14 @@ void run_client(thread_params_t* params) {
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = 1;
   dgram_config.prealloc_buf = nullptr;
-  dgram_config.buf_size = kAppBufSize;
+  dgram_config.buf_size = FLAGS_size * FLAGS_postlist;
   dgram_config.buf_shm_key = -1;
 
   auto* cb = hrd_ctrl_blk_init(clt_local_hid, ib_port_index,
                                kHrdInvalidNUMANode, &dgram_config);
 
   // Buffer to send packets from. Set to a non-zero value.
-  memset(const_cast<uint8_t*>(cb->dgram_buf), 1, kAppBufSize);
+  memset(const_cast<uint8_t*>(cb->dgram_buf), 1, dgram_config.buf_size);
 
   printf("main: Client %zu waiting for server %zu\n", clt_gid, srv_gid);
 
@@ -198,14 +198,11 @@ void run_client(thread_params_t* params) {
       wr[w_i].imm_data = 3185;
       wr[w_i].sg_list = &sgl[w_i];
 
-      // kAppUnsigBatch >= 2 * postlist ensures that we poll for a
-      // completed send() only after we have performed a signaled send().
-      wr[w_i].send_flags = nb_tx % kAppUnsigBatch == 0 ? IBV_SEND_SIGNALED : 0;
+      wr[w_i].send_flags = IBV_SEND_INLINE;
+      wr[w_i].send_flags |= nb_tx % kAppUnsigBatch == 0 ? IBV_SEND_SIGNALED : 0;
       if (nb_tx % kAppUnsigBatch == kAppUnsigBatch - 1) {
         hrd_poll_cq(cb->dgram_send_cq[0], 1, wc);
       }
-
-      wr[w_i].send_flags |= IBV_SEND_INLINE;
 
       sgl[w_i].addr = reinterpret_cast<uint64_t>(cb->dgram_buf);
       sgl[w_i].length = FLAGS_size;
@@ -229,9 +226,7 @@ int main(int argc, char* argv[]) {
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
             "Invalid postlist");
-  rt_assert(
-      FLAGS_size > 0 && FLAGS_size + sizeof(struct ibv_grh) <= kAppBufSize,
-      "Invalid transfer size");
+  rt_assert(FLAGS_size > 0, "Invalid transfer size");
 
   if (FLAGS_is_client == 1) {
     rt_assert(FLAGS_machine_id != std::numeric_limits<size_t>::max(),
