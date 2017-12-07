@@ -157,15 +157,7 @@ void run_client(thread_params_t* params) {
   printf("main: Client %zu found server! Now posting SENDs.\n", clt_gid);
 
   // We need only one address handle because we contacts only one server
-  struct ibv_ah_attr ah_attr;
-  memset(&ah_attr, 0, sizeof(ah_attr));
-  ah_attr.is_global = 0;
-  ah_attr.dlid = srv_qp[0]->lid;
-  ah_attr.sl = 0;
-  ah_attr.src_path_bits = 0;
-  ah_attr.port_num = cb->resolve.dev_port_id;
-
-  struct ibv_ah* ah = ibv_create_ah(cb->pd, &ah_attr);
+  struct ibv_ah* ah = hrd_create_ah(cb, srv_qp[0]->lid);
   assert(ah != nullptr);
 
   struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;

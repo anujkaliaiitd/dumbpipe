@@ -123,6 +123,9 @@ hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
 
 int hrd_ctrl_blk_destroy(hrd_ctrl_blk_t* cb);
 
+/// Create an address handle to \p lid using this control block
+struct ibv_ah* hrd_create_ah(hrd_ctrl_blk_t* cb, uint16_t lid);
+
 // Debug
 void hrd_ibv_devinfo(void);
 

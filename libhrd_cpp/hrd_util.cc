@@ -1,5 +1,5 @@
-#include <stdexcept>
 #include "hrd.h"
+#include <stdexcept>
 
 // Every thread creates a TCP connection to the registry only once.
 __thread memcached_st* memc = nullptr;
@@ -107,6 +107,21 @@ void hrd_resolve_port_index(struct hrd_ctrl_blk_t* cb, size_t port_index) {
   // If we come here, port resolution failed
   throw std::runtime_error("Failed to resolve IB port index " +
                            std::to_string(port_index));
+}
+
+struct ibv_ah* hrd_create_ah(hrd_ctrl_blk_t* cb, uint16_t lid) {
+  struct ibv_ah_attr ah_attr;
+  memset(&ah_attr, 0, sizeof(ah_attr));
+  ah_attr.is_global = 0;
+  ah_attr.dlid = lid;
+  ah_attr.sl = 0;
+  ah_attr.src_path_bits = 0;
+  ah_attr.port_num = cb->resolve.dev_port_id;
+
+  struct ibv_ah* ah = ibv_create_ah(cb->pd, &ah_attr);
+  rt_assert(ah != nullptr, "Failed to create address handle");
+
+  return ah;
 }
 
 // Allocate SHM with @shm_key, and save the shmid into @shm_id_ret

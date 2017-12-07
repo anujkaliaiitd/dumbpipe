@@ -65,15 +65,7 @@ void run_client(thread_params_t* params) {
 
   printf("main: Client %s found server! Now posting SENDs.\n", clt_name);
 
-  struct ibv_ah_attr ah_attr;
-  memset(&ah_attr, 0, sizeof(ah_attr));
-  ah_attr.is_global = 0;
-  ah_attr.dlid = srv_qp->lid;
-  ah_attr.sl = 0;
-  ah_attr.src_path_bits = 0;
-  ah_attr.port_num = cb->resolve.dev_port_id;
-
-  struct ibv_ah* ah = ibv_create_ah(cb->pd, &ah_attr);
+  struct ibv_ah* ah = hrd_create_ah(cb, srv_qp->lid);
   assert(ah != nullptr);
 
   struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;
@@ -224,18 +216,7 @@ void run_server(thread_params_t* params) {
 
     for (size_t w_i = 0; w_i < num_comps; w_i++) {
       int s_lid = wc[w_i].slid;  // Src LID for this request
-      if (ah[s_lid] == nullptr) {
-        struct ibv_ah_attr ah_attr;
-        memset(&ah_attr, 0, sizeof(ah_attr));
-        ah_attr.is_global = 0;
-        ah_attr.dlid = s_lid;
-        ah_attr.sl = 0;
-        ah_attr.src_path_bits = 0;
-        ah_attr.port_num = cb->resolve.dev_port_id;
-
-        ah[s_lid] = ibv_create_ah(cb->pd, &ah_attr);
-        rt_assert(ah[s_lid] != nullptr, "Failed to resovle ah");
-      }
+      if (ah[s_lid] == nullptr) ah[s_lid] = hrd_create_ah(cb, s_lid);
 
       wr[w_i].wr.ud.ah = ah[wc[w_i].slid];
       wr[w_i].wr.ud.remote_qpn = wc[w_i].src_qp;
