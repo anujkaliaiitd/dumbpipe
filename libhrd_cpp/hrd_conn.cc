@@ -5,8 +5,7 @@
 // size of the new buffer to create.
 struct hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
                                          size_t numa_node,
-                                         hrd_dgram_config_t* dgram_config,
-                                         hrd_ignore_overrun_t ignore_overun) {
+                                         hrd_dgram_config_t* dgram_config) {
   hrd_red_printf("HRD: creating control block %zu: port %zu, socket %zu.\n",
                  local_hid, port_index, numa_node);
 
@@ -29,7 +28,6 @@ struct hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
   cb->local_hid = local_hid;
   cb->port_index = port_index;
   cb->numa_node = numa_node;
-  cb->ignore_overrun = (ignore_overun == hrd_ignore_overrun_t::kTrue);
 
   // Datagram QPs
   if (dgram_config != nullptr) {
@@ -41,6 +39,8 @@ struct hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
     if (dgram_config->prealloc_buf != nullptr) {
       assert(cb->dgram_buf_shm_key == -1);
     }
+
+    cb->dgram_ignore_overrun = dgram_config->ignore_overrun;
   }
 
   // Resolve the port into cb->resolve
@@ -158,20 +158,16 @@ void hrd_create_dgram_qps(hrd_ctrl_blk_t* cb) {
                           nullptr, 0, &cq_init_attr);
     rt_assert(cb->dgram_recv_cq[i] != nullptr, "Failed to create RECV CQ");
 
-    /*
-    if (cb->ignore_overrun) {
-      // Modify the CQ to ignore overruns
+    if (cb->dgram_ignore_overrun) {
+      // Modify the RECV CQ to ignore overruns
       struct ibv_exp_cq_attr cq_attr;
       memset(&cq_attr, 0, sizeof(cq_attr));
       cq_attr.comp_mask = IBV_EXP_CQ_ATTR_CQ_CAP_FLAGS;
       cq_attr.cq_cap_flags = IBV_EXP_CQ_IGNORE_OVERRUN;
-      if (ibv_exp_modify_cq(cb->dgram_recv_cq[i], &cq_attr,
-                            IBV_EXP_CQ_CAP_FLAGS)) {
-        fprintf(stderr, "Failed to modify CQ to ignore overruns.\n");
-        exit(-1);
-      }
+      rt_assert(ibv_exp_modify_cq(cb->dgram_recv_cq[i], &cq_attr,
+                                  IBV_EXP_CQ_CAP_FLAGS) == 0,
+                "Failed to modify CQ to ignore overruns");
     }
-    */
 
     // Create the QP
     struct ibv_exp_qp_init_attr create_attr;
@@ -190,7 +186,7 @@ void hrd_create_dgram_qps(hrd_ctrl_blk_t* cb) {
     create_attr.cap.max_recv_wr = recv_queue_depth;
     create_attr.cap.max_recv_sge = 1;
 
-    if (cb->ignore_overrun) {
+    if (cb->dgram_ignore_overrun) {
       create_attr.exp_create_flags |= IBV_EXP_QP_CREATE_IGNORE_RQ_OVERFLOW;
     }
 

@@ -88,7 +88,6 @@ struct hrd_ctrl_blk_t {
   // Info about the device/port to use for this control block
   size_t port_index;  // User-supplied. 0-based across all devices
   size_t numa_node;   // NUMA node id
-  bool ignore_overrun;
 
   /// InfiniBand info resolved from \p phy_port, must be filled by constructor.
   struct {
@@ -108,6 +107,7 @@ struct hrd_ctrl_blk_t {
   size_t dgram_buf_size;
   int dgram_buf_shm_key;
   struct ibv_mr* dgram_buf_mr;
+  bool dgram_ignore_overrun;
 
   uint8_t pad[64];
 };
@@ -117,15 +117,12 @@ struct hrd_dgram_config_t {
   volatile uint8_t* prealloc_buf;
   size_t buf_size;
   int buf_shm_key;
+  bool ignore_overrun;
 };
 
-enum class hrd_ignore_overrun_t : bool { kTrue, kFalse };
-
 // Major initialzation functions
-hrd_ctrl_blk_t* hrd_ctrl_blk_init(
-    size_t local_hid, size_t port_index, size_t numa_node,
-    hrd_dgram_config_t* dgram_config,
-    hrd_ignore_overrun_t ignore_overrun = hrd_ignore_overrun_t::kFalse);
+hrd_ctrl_blk_t* hrd_ctrl_blk_init(size_t local_hid, size_t port_index,
+                                  size_t numa_node, hrd_dgram_config_t*);
 
 int hrd_ctrl_blk_destroy(hrd_ctrl_blk_t* cb);
 

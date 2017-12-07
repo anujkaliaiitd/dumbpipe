@@ -32,9 +32,10 @@ void run_server(thread_params_t* params) {
   dgram_config.prealloc_buf = nullptr;
   dgram_config.buf_size = kAppBufSize;
   dgram_config.buf_shm_key = -1;
+  dgram_config.ignore_overrun = true;
 
   auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
-                               &dgram_config, hrd_ignore_overrun_t::kTrue);
+                               &dgram_config);
 
   // Buffer to receive packets into. Set to zero.
   memset(const_cast<uint8_t*>(cb->dgram_buf), 0, kAppBufSize);
