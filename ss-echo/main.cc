@@ -6,7 +6,6 @@
 #include "libhrd_cpp/hrd.h"
 
 static constexpr size_t kAppNumQPs = 1;  // UD QPs used by server for RECVs
-static constexpr size_t kAppBufSize = 4096;
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 static_assert(is_power_of_two(kAppUnsigBatch), "");
@@ -24,6 +23,9 @@ DEFINE_uint64(dual_port, 0, "Use two ports?");
 DEFINE_uint64(size, 0, "RDMA size");
 DEFINE_uint64(postlist, std::numeric_limits<size_t>::max(), "Postlist size");
 
+/// Return the size of one RECV buffer
+size_t recv_mbuf_sz() { return sizeof(struct ibv_grh) + FLAGS_size; }
+
 void run_client(thread_params_t* params) {
   // The local HID of a control block should be <= 64 to keep the SHM key low.
   // But the number of clients over all machines can be larger.
@@ -34,19 +36,21 @@ void run_client(thread_params_t* params) {
 
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = 1;
-  dgram_config.buf_size = kAppBufSize;
+  dgram_config.buf_size = recv_mbuf_sz();
   dgram_config.buf_shm_key = -1;
   dgram_config.ignore_overrun = false;
 
   auto* cb = hrd_ctrl_blk_init(clt_local_hid, ib_port_index,
                                kHrdInvalidNUMANode, &dgram_config);
 
-  // Buffer to receive responses into
-  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, kAppBufSize);
+  // One buffer to receive all responses into
+  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, dgram_config.buf_size);
 
-  // Buffer to send requests from
-  auto* req_buf = new uint8_t[FLAGS_size];
-  memset(req_buf, clt_gid, FLAGS_size);
+  // Buffers to send requests from
+  auto** req_buf_arr = new uint8_t*[FLAGS_postlist];
+  for (size_t i = 0; i < FLAGS_postlist; i++) {
+    req_buf_arr[i] = new uint8_t[FLAGS_size];
+  }
 
   char srv_name[kHrdQPNameSize];
   sprintf(srv_name, "server-%zu", srv_gid);
@@ -72,6 +76,7 @@ void run_client(thread_params_t* params) {
   struct ibv_wc wc[kAppMaxPostlist];
   struct ibv_sge sgl[kAppMaxPostlist];
   size_t rolling_iter = 0;  // For throughput measurement
+  size_t nb_tx = 0;         // For stamping requests
 
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
@@ -89,7 +94,7 @@ void run_client(thread_params_t* params) {
 
     for (size_t w_i = 0; w_i < FLAGS_postlist; w_i++) {
       hrd_post_dgram_recv(cb->dgram_qp[0], const_cast<uint8_t*>(cb->dgram_buf),
-                          kAppBufSize, cb->dgram_buf_mr->lkey);
+                          recv_mbuf_sz(), cb->dgram_buf_mr->lkey);
 
       wr[w_i].wr.ud.ah = ah;
       wr[w_i].wr.ud.remote_qpn = srv_qp->qpn;
@@ -103,9 +108,11 @@ void run_client(thread_params_t* params) {
       wr[w_i].send_flags = (w_i == 0) ? IBV_SEND_SIGNALED : 0;
       wr[w_i].send_flags |= IBV_SEND_INLINE;
 
-      sgl[w_i].addr = reinterpret_cast<uint64_t>(req_buf);
+      *reinterpret_cast<size_t*>(req_buf_arr[w_i]) = nb_tx;
+      sgl[w_i].addr = reinterpret_cast<uint64_t>(req_buf_arr[w_i]);
       sgl[w_i].length = FLAGS_size;
 
+      nb_tx++;
       rolling_iter++;
     }
 
@@ -113,9 +120,7 @@ void run_client(thread_params_t* params) {
     rt_assert(ret == 0, "ibv_post_send() error");
 
     hrd_poll_cq(cb->dgram_send_cq[0], 1, wc);  // Poll SEND (w_i = 0)
-
-    // Poll for all RECVs
-    hrd_poll_cq(cb->dgram_recv_cq[0], FLAGS_postlist, wc);
+    hrd_poll_cq(cb->dgram_recv_cq[0], FLAGS_postlist, wc);  // Receive all resps
   }
 }
 
@@ -125,28 +130,26 @@ void run_server(thread_params_t* params) {
 
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = kAppNumQPs;
-  dgram_config.buf_size = kAppBufSize;
+  dgram_config.buf_size = recv_mbuf_sz() * kHrdRQDepth;
   dgram_config.buf_shm_key = -1;
   dgram_config.ignore_overrun = false;
 
   auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
                                &dgram_config);
 
-  // Buffer to receive requests into
-  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, kAppBufSize);
-
-  // Buffer to send responses from
-  auto* resp_buf = new uint8_t[FLAGS_size];
-  memset(resp_buf, 1, FLAGS_size);
+  // Ring buffers to receive requests into
+  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, dgram_config.buf_size);
+  auto* resp_buf = new uint8_t[FLAGS_size];  // Garbage buffer for responses
 
   char srv_name[kHrdQPNameSize];
   sprintf(srv_name, "server-%zu", srv_gid);
 
   // We post RECVs only on the 1st QP.
   for (size_t i = 0; i < kHrdRQDepth; i++) {
-    hrd_post_dgram_recv(cb->dgram_qp[0], const_cast<uint8_t*>(cb->dgram_buf),
-                        FLAGS_size + sizeof(struct ibv_grh),
-                        cb->dgram_buf_mr->lkey);
+    hrd_post_dgram_recv(
+        cb->dgram_qp[0],
+        const_cast<uint8_t*>(&cb->dgram_buf[recv_mbuf_sz() * i]),
+        recv_mbuf_sz(), cb->dgram_buf_mr->lkey);
   }
 
   hrd_publish_dgram_qp(cb, 0, srv_name);
@@ -160,15 +163,13 @@ void run_server(thread_params_t* params) {
   struct ibv_recv_wr recv_wr[kAppMaxPostlist], *bad_recv_wr;
   struct ibv_wc wc[kAppMaxPostlist];
   struct ibv_sge sgl[kAppMaxPostlist];
+
   size_t rolling_iter = 0;  // For throughput measurement
   size_t nb_tx[kAppNumQPs] = {0}, nb_tx_tot = 0, nb_post_send = 0;
+  size_t ring_head = 0;
 
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
-
-  size_t recv_offset = 0;
-  while (recv_offset < FLAGS_size + 40) recv_offset += 64;
-  assert(recv_offset * FLAGS_postlist <= kAppBufSize);
 
   size_t qp_i = 0;
   while (1) {
@@ -201,10 +202,11 @@ void run_server(thread_params_t* params) {
 
     // Post a batch of RECVs
     for (size_t w_i = 0; w_i < num_comps; w_i++) {
-      sgl[w_i].length = FLAGS_size + sizeof(struct ibv_grh);
+      sgl[w_i].length = recv_mbuf_sz();
       sgl[w_i].lkey = cb->dgram_buf_mr->lkey;
-      sgl[w_i].addr =
-          reinterpret_cast<uint64_t>(&cb->dgram_buf[recv_offset * w_i]);
+      sgl[w_i].addr = reinterpret_cast<uint64_t>(
+          &cb->dgram_buf[ring_head * recv_mbuf_sz()]);
+      ring_head = (ring_head + 1) % kHrdRQDepth;  // Shift
 
       recv_wr[w_i].sg_list = &sgl[w_i];
       recv_wr[w_i].num_sge = 1;
@@ -259,9 +261,8 @@ int main(int argc, char* argv[]) {
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
             "Invalid postlist");
-  rt_assert(
-      FLAGS_size > 0 && FLAGS_size + sizeof(struct ibv_grh) <= kAppBufSize,
-      "Invalid transfer size");
+  rt_assert(FLAGS_size > 0 && FLAGS_size <= kHrdMaxInline,
+            "Invalid transfer size");
 
   // More checks
   rt_assert(FLAGS_postlist <= kAppUnsigBatch, "Postlist check failed");
