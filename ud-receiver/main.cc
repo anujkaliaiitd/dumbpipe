@@ -11,6 +11,8 @@ static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 static_assert(is_power_of_two(kAppUnsigBatch), "");
 
+static constexpr bool kIgnoreOverrun = true;  // Ignore RQ/CQ overruns
+
 struct thread_params_t {
   size_t id;
   double* tput;
@@ -32,7 +34,7 @@ void run_server(thread_params_t* params) {
   dgram_config.prealloc_buf = nullptr;
   dgram_config.buf_size = kAppBufSize;
   dgram_config.buf_shm_key = -1;
-  dgram_config.ignore_overrun = true;
+  dgram_config.ignore_overrun = kIgnoreOverrun;
 
   auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
                                &dgram_config);
@@ -62,12 +64,11 @@ void run_server(thread_params_t* params) {
   while (true) {
     if (rolling_iter >= MB(8)) {
       clock_gettime(CLOCK_REALTIME, &end);
-      double seconds = (end.tv_sec - start.tv_sec) +
-                       (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-      printf("main: Server %zu: %.2f IOPS. \n", srv_gid,
-             rolling_iter / seconds);
+      double sec = (end.tv_sec - start.tv_sec) +
+                   (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+      printf("main: Server %zu: %.2f IOPS. \n", srv_gid, rolling_iter / sec);
 
-      params->tput[srv_gid] = rolling_iter / seconds;
+      params->tput[srv_gid] = rolling_iter / sec;
       if (srv_gid == 0) {
         double tot = 0;
         for (size_t i = 0; i < FLAGS_num_threads; i++) tot += params->tput[i];
@@ -75,42 +76,36 @@ void run_server(thread_params_t* params) {
       }
 
       rolling_iter = 0;
-
       clock_gettime(CLOCK_REALTIME, &start);
     }
 
-    int num_comps = 0;
-
-    {
+    size_t num_comps = 0;
+    if (kIgnoreOverrun) {
+      // Detect completion by polling on the RX buffer
       if (cb->dgram_buf[40] != 0) {
         num_comps++;
         cb->dgram_buf[40] = 0;
       }
-      if (num_comps == 0) continue;
+    } else {
+      struct ibv_wc wc[kAppMaxPostlist];
+      int ret = ibv_poll_cq(cb->dgram_recv_cq[qp_i], FLAGS_postlist, wc);
+      assert(ret >= 0);
+      num_comps = static_cast<size_t>(ret);
     }
 
-    /*
-    {
-      struct ibv_wc wc[kAppMaxPostlist];
-      num_comps = ibv_poll_cq(cb->dgram_recv_cq[qp_i], FLAGS_postlist, wc);
-      rt_assert(num_comps >= 0, "poll_cq() for RECV CQ failed");
-      if (num_comps == 0) continue;
-    }
-    */
+    if (num_comps == 0) continue;
 
     // Post a batch of RECVs
     struct ibv_recv_wr recv_wr[kAppMaxPostlist], *bad_recv_wr;
     struct ibv_sge sgl[kAppMaxPostlist];
-    for (size_t w_i = 0; w_i < static_cast<size_t>(num_comps); w_i++) {
+    for (size_t w_i = 0; w_i < num_comps; w_i++) {
       sgl[w_i].length = FLAGS_size + 40;
       sgl[w_i].lkey = cb->dgram_buf_mr->lkey;
       sgl[w_i].addr = reinterpret_cast<uint64_t>(&cb->dgram_buf[0]);
 
       recv_wr[w_i].sg_list = &sgl[w_i];
       recv_wr[w_i].num_sge = 1;
-      recv_wr[w_i].next = w_i == static_cast<size_t>(num_comps) - 1
-                              ? nullptr
-                              : &recv_wr[w_i + 1];
+      recv_wr[w_i].next = (w_i == num_comps - 1) ? nullptr : &recv_wr[w_i + 1];
     }
 
     int ret = ibv_post_recv(cb->dgram_qp[qp_i], &recv_wr[0], &bad_recv_wr);
