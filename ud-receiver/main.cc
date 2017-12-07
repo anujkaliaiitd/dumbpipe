@@ -45,9 +45,9 @@ void run_server(thread_params_t* params) {
   for (size_t qp_i = 0; qp_i < kAppNumQPs; qp_i++) {
     // Fill this QP with recvs before publishing it to clients
     for (size_t i = 0; i < kHrdRQDepth; i++) {
-      hrd_post_dgram_recv(cb->dgram_qp[qp_i],
-                          const_cast<uint8_t*>(&cb->dgram_buf[0]),
-                          FLAGS_size + 40, cb->dgram_buf_mr->lkey);
+      hrd_post_dgram_recv(
+          cb->dgram_qp[qp_i], const_cast<uint8_t*>(&cb->dgram_buf[0]),
+          FLAGS_size + sizeof(struct ibv_grh), cb->dgram_buf_mr->lkey);
     }
 
     char srv_name[kHrdQPNameSize];
@@ -82,9 +82,9 @@ void run_server(thread_params_t* params) {
     size_t num_comps = 0;
     if (kIgnoreOverrun) {
       // Detect completion by polling on the RX buffer
-      if (cb->dgram_buf[40] != 0) {
+      if (cb->dgram_buf[sizeof(struct ibv_grh)] != 0) {
         num_comps++;
-        cb->dgram_buf[40] = 0;
+        cb->dgram_buf[sizeof(struct ibv_grh)] = 0;
       }
     } else {
       struct ibv_wc wc[kAppMaxPostlist];
@@ -99,7 +99,7 @@ void run_server(thread_params_t* params) {
     struct ibv_recv_wr recv_wr[kAppMaxPostlist], *bad_recv_wr;
     struct ibv_sge sgl[kAppMaxPostlist];
     for (size_t w_i = 0; w_i < num_comps; w_i++) {
-      sgl[w_i].length = FLAGS_size + 40;
+      sgl[w_i].length = FLAGS_size + sizeof(struct ibv_grh);
       sgl[w_i].lkey = cb->dgram_buf_mr->lkey;
       sgl[w_i].addr = reinterpret_cast<uint64_t>(&cb->dgram_buf[0]);
 
@@ -229,8 +229,9 @@ int main(int argc, char* argv[]) {
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
             "Invalid postlist");
-  rt_assert(FLAGS_size > 0 && FLAGS_size + 40 <= kAppBufSize,
-            "Invalid transfer size");
+  rt_assert(
+      FLAGS_size > 0 && FLAGS_size + sizeof(struct ibv_grh) <= kAppBufSize,
+      "Invalid transfer size");
 
   if (FLAGS_is_client == 1) {
     rt_assert(FLAGS_machine_id != std::numeric_limits<size_t>::max(),
