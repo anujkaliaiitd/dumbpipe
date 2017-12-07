@@ -76,7 +76,7 @@ void run_client(thread_params_t* params) {
   struct ibv_wc wc[kAppMaxPostlist];
   struct ibv_sge sgl[kAppMaxPostlist];
   size_t rolling_iter = 0;  // For throughput measurement
-  size_t nb_tx = 0;         // For stamping requests
+  size_t pkt_stamp = 1;     // For stamping requests
 
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
@@ -108,11 +108,11 @@ void run_client(thread_params_t* params) {
       wr[w_i].send_flags = (w_i == 0) ? IBV_SEND_SIGNALED : 0;
       wr[w_i].send_flags |= IBV_SEND_INLINE;
 
-      *reinterpret_cast<size_t*>(req_buf_arr[w_i]) = nb_tx;
+      *reinterpret_cast<size_t*>(req_buf_arr[w_i]) = pkt_stamp;
       sgl[w_i].addr = reinterpret_cast<uint64_t>(req_buf_arr[w_i]);
       sgl[w_i].length = FLAGS_size;
 
-      nb_tx++;
+      pkt_stamp++;
       rolling_iter++;
     }
 
@@ -166,14 +166,16 @@ void run_server(thread_params_t* params) {
 
   size_t rolling_iter = 0;  // For throughput measurement
   size_t nb_tx[kAppNumQPs] = {0}, nb_tx_tot = 0, nb_post_send = 0;
-  size_t ring_head = 0;
+
+  // RX ring polling
+  size_t ring_head = 0, expected_stamp = 1;
 
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
 
   size_t qp_i = 0;
   while (1) {
-    if (rolling_iter >= MB(4)) {
+    if (rolling_iter >= MB(1)) {
       clock_gettime(CLOCK_REALTIME, &end);
 
       double seconds = (end.tv_sec - start.tv_sec) +
@@ -206,6 +208,14 @@ void run_server(thread_params_t* params) {
       sgl[w_i].lkey = cb->dgram_buf_mr->lkey;
       sgl[w_i].addr = reinterpret_cast<uint64_t>(
           &cb->dgram_buf[ring_head * recv_mbuf_sz()]);
+
+      // Check the stamp
+      size_t rx_ring_stamp =
+          *reinterpret_cast<size_t*>(sgl[w_i].addr + sizeof(struct ibv_grh));
+      rt_assert(rx_ring_stamp == expected_stamp,
+                "Invalid stamp " + std::to_string(rx_ring_stamp));
+
+      expected_stamp++;
       ring_head = (ring_head + 1) % kHrdRQDepth;  // Shift
 
       recv_wr[w_i].sg_list = &sgl[w_i];
