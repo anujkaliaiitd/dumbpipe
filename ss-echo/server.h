@@ -6,12 +6,7 @@ void poll_cq_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
   size_t srv_gid = params->id;               // Global ID of this server thread
   auto* resp_buf = new uint8_t[FLAGS_size];  // Garbage buffer for responses
 
-  // We'll initialize address handles on demand
-  struct ibv_ah* ah[kHrdMaxLID];
-  memset(ah, 0, kHrdMaxLID * sizeof(uintptr_t));
-
-  struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;
-  struct ibv_recv_wr recv_wr[kAppMaxPostlist], *bad_recv_wr;
+  struct ibv_ah* ah[kHrdMaxLID] = {nullptr};  // Initialized on demand
   struct ibv_wc wc[kAppMaxPostlist];
   struct ibv_sge sgl[kAppMaxPostlist];
 
@@ -28,10 +23,7 @@ void poll_cq_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
   while (true) {
     if (rolling_iter >= MB(1)) {
       clock_gettime(CLOCK_REALTIME, &end);
-
-      double seconds = (end.tv_sec - start.tv_sec) +
-                       (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-      params->tput[srv_gid] = rolling_iter / seconds;
+      params->tput[srv_gid] = rolling_iter / hrd_get_seconds(start, end);
       printf("main: Server %zu: %.2f Mops. Average postlist = %.2f\n", srv_gid,
              params->tput[srv_gid], nb_tx_tot * 1.0 / nb_post_send);
 
@@ -54,6 +46,7 @@ void poll_cq_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
     if (num_comps == 0) continue;
 
     // Post a batch of RECVs
+    struct ibv_recv_wr recv_wr[kAppMaxPostlist], *bad_recv_wr;
     for (size_t w_i = 0; w_i < num_comps; w_i++) {
       sgl[w_i].length = recv_mbuf_sz();
       sgl[w_i].lkey = cb->dgram_buf_mr->lkey;
@@ -77,6 +70,8 @@ void poll_cq_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
     ret = ibv_post_recv(cb->dgram_qp[0], &recv_wr[0], &bad_recv_wr);
     rt_assert(ret == 0, "ibv_post_recv() error");
 
+    // Send responses
+    struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;
     for (size_t w_i = 0; w_i < num_comps; w_i++) {
       int s_lid = wc[w_i].slid;  // Src LID for this request
       if (ah[s_lid] == nullptr) ah[s_lid] = hrd_create_ah(cb, s_lid);
