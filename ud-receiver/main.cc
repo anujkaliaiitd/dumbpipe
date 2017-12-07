@@ -7,10 +7,13 @@
 
 static constexpr size_t kAppNumQPs = 1;  // UD QPs used by server for RECVs
 static constexpr size_t kAppMaxPostlist = 64;
+static constexpr size_t kAppMaxSize = 60;  // Max transfer size
 static constexpr size_t kAppUnsigBatch = 64;
-static_assert(is_power_of_two(kAppUnsigBatch), "");
-
 static constexpr bool kIgnoreOverrun = true;  // Ignore RQ/CQ overruns
+
+// pkt_arr reuse at clients relies on inlining
+static_assert(kAppMaxSize <= kHrdMaxInline, "");
+static_assert(is_power_of_two(kAppUnsigBatch), "");
 
 struct thread_params_t {
   size_t id;
@@ -129,11 +132,12 @@ void run_client(thread_params_t* params) {
 
   hrd_dgram_config_t dgram_config;
   dgram_config.num_qps = 1;
-  dgram_config.buf_size = FLAGS_size * FLAGS_postlist;
+  dgram_config.buf_size = 0;  // We don't need a registered buffer
   dgram_config.buf_shm_key = -1;
 
   auto* cb = hrd_ctrl_blk_init(clt_local_hid, ib_port_index,
                                kHrdInvalidNUMANode, &dgram_config);
+  assert(cb != nullptr);
 
   // Buffer to send packets from. Set to a non-zero value.
   memset(const_cast<uint8_t*>(cb->dgram_buf), 1, dgram_config.buf_size);
@@ -174,6 +178,11 @@ void run_client(thread_params_t* params) {
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
 
+  uint8_t* pkt_arr[kAppMaxPostlist];  // Leaked
+  for (size_t i = 0; i < kAppMaxPostlist; i++) {
+    pkt_arr[i] = reinterpret_cast<uint8_t*>(malloc(FLAGS_size));
+  }
+
   while (true) {
     if (rolling_iter >= MB(2)) {
       clock_gettime(CLOCK_REALTIME, &end);
@@ -185,7 +194,10 @@ void run_client(thread_params_t* params) {
       clock_gettime(CLOCK_REALTIME, &start);
     }
 
+    // Reusing pkt_arr buffers is OK because the payloads are inlined
     for (size_t w_i = 0; w_i < FLAGS_postlist; w_i++) {
+      *reinterpret_cast<size_t*>(pkt_arr[w_i]) = nb_tx;
+
       wr[w_i].wr.ud.ah = ah;
       wr[w_i].wr.ud.remote_qpn = srv_qp[qp_i]->qpn;
       wr[w_i].wr.ud.remote_qkey = kHrdDefaultQKey;
@@ -202,7 +214,7 @@ void run_client(thread_params_t* params) {
         hrd_poll_cq(cb->dgram_send_cq[0], 1, wc);
       }
 
-      sgl[w_i].addr = reinterpret_cast<uint64_t>(cb->dgram_buf);
+      sgl[w_i].addr = reinterpret_cast<uint64_t>(pkt_arr[w_i]);
       sgl[w_i].length = FLAGS_size;
 
       rolling_iter++;
@@ -224,7 +236,8 @@ int main(int argc, char* argv[]) {
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
             "Invalid postlist");
-  rt_assert(FLAGS_size > 0, "Invalid transfer size");
+  rt_assert(FLAGS_size > 0 && FLAGS_size <= kAppMaxSize,
+            "Invalid transfer size");
 
   if (FLAGS_is_client == 1) {
     rt_assert(FLAGS_machine_id != std::numeric_limits<size_t>::max(),
