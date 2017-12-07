@@ -1,35 +1,10 @@
 #include "main.h"
 
-void run_server(thread_params_t* params) {
-  size_t srv_gid = params->id;  // Global ID of this server thread
-  size_t ib_port_index = FLAGS_dual_port == 0 ? 0 : srv_gid % 2;
+static constexpr bool kIgnoreOverrun = false;
 
-  hrd_dgram_config_t dgram_config;
-  dgram_config.num_qps = kAppNumQPs;
-  dgram_config.buf_size = recv_mbuf_sz() * kHrdRQDepth;
-  dgram_config.buf_shm_key = -1;
-  dgram_config.ignore_overrun = false;
-
-  auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
-                               &dgram_config);
-
-  // Ring buffers to receive requests into
-  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, dgram_config.buf_size);
+void poll_cq_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
+  size_t srv_gid = params->id;               // Global ID of this server thread
   auto* resp_buf = new uint8_t[FLAGS_size];  // Garbage buffer for responses
-
-  char srv_name[kHrdQPNameSize];
-  sprintf(srv_name, "server-%zu", srv_gid);
-
-  // We post RECVs only on the 1st QP.
-  for (size_t i = 0; i < kHrdRQDepth; i++) {
-    hrd_post_dgram_recv(
-        cb->dgram_qp[0],
-        const_cast<uint8_t*>(&cb->dgram_buf[recv_mbuf_sz() * i]),
-        recv_mbuf_sz(), cb->dgram_buf_mr->lkey);
-  }
-
-  hrd_publish_dgram_qp(cb, 0, srv_name);
-  printf("server: Server %s published. Now polling..\n", srv_name);
 
   // We'll initialize address handles on demand
   struct ibv_ah* ah[kHrdMaxLID];
@@ -50,7 +25,7 @@ void run_server(thread_params_t* params) {
   clock_gettime(CLOCK_REALTIME, &start);
 
   size_t qp_i = 0;
-  while (1) {
+  while (true) {
     if (rolling_iter >= MB(1)) {
       clock_gettime(CLOCK_REALTIME, &end);
 
@@ -106,7 +81,7 @@ void run_server(thread_params_t* params) {
       int s_lid = wc[w_i].slid;  // Src LID for this request
       if (ah[s_lid] == nullptr) ah[s_lid] = hrd_create_ah(cb, s_lid);
 
-      wr[w_i].wr.ud.ah = ah[wc[w_i].slid];
+      wr[w_i].wr.ud.ah = ah[s_lid];
       wr[w_i].wr.ud.remote_qpn = wc[w_i].src_qp;
       wr[w_i].wr.ud.remote_qkey = kHrdDefaultQKey;
 
@@ -136,4 +111,37 @@ void run_server(thread_params_t* params) {
     rt_assert(ret == 0, "ibv_post_send error");
     mod_add_one<kAppNumQPs>(qp_i);
   }
+}
+
+void run_server(thread_params_t* params) {
+  size_t srv_gid = params->id;  // Global ID of this server thread
+  size_t ib_port_index = FLAGS_dual_port == 0 ? 0 : srv_gid % 2;
+
+  hrd_dgram_config_t dgram_config;
+  dgram_config.num_qps = kAppNumQPs;
+  dgram_config.buf_size = recv_mbuf_sz() * kHrdRQDepth;
+  dgram_config.buf_shm_key = -1;
+  dgram_config.ignore_overrun = kIgnoreOverrun;
+
+  auto* cb = hrd_ctrl_blk_init(srv_gid, ib_port_index, kHrdInvalidNUMANode,
+                               &dgram_config);
+
+  // Ring buffers to receive requests into
+  memset(const_cast<uint8_t*>(cb->dgram_buf), 0, dgram_config.buf_size);
+
+  char srv_name[kHrdQPNameSize];
+  sprintf(srv_name, "server-%zu", srv_gid);
+
+  // We post RECVs only on the 1st QP.
+  for (size_t i = 0; i < kHrdRQDepth; i++) {
+    hrd_post_dgram_recv(
+        cb->dgram_qp[0],
+        const_cast<uint8_t*>(&cb->dgram_buf[recv_mbuf_sz() * i]),
+        recv_mbuf_sz(), cb->dgram_buf_mr->lkey);
+  }
+
+  hrd_publish_dgram_qp(cb, 0, srv_name);
+  printf("server: Server %s published. Now polling..\n", srv_name);
+
+  poll_cq_server(params, cb);
 }
