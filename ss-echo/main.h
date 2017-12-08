@@ -22,6 +22,7 @@ struct req_hdr_t {
   uint32_t qpn;   // Client QPN
   uint32_t slid;  // Client LID
 };
+static_assert(sizeof(req_hdr_t) <= kHrdMaxInline, "");
 
 DEFINE_uint64(machine_id, std::numeric_limits<size_t>::max(), "Machine ID");
 DEFINE_uint64(num_client_threads, 0, "Number of client threads/machine");

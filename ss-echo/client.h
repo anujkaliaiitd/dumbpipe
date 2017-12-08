@@ -82,8 +82,13 @@ void run_client(thread_params_t* params) {
       wr[w_i].send_flags = (w_i == 0) ? IBV_SEND_SIGNALED : 0;
       wr[w_i].send_flags |= IBV_SEND_INLINE;
 
-      *reinterpret_cast<size_t*>(req_buf_arr[w_i]) = pkt_stamp;
-      sgl[w_i].addr = reinterpret_cast<uint64_t>(req_buf_arr[w_i]);
+      // Format the request
+      auto* req_hdr = reinterpret_cast<req_hdr_t*>(req_buf_arr[w_i]);
+      req_hdr->stamp = pkt_stamp;
+      req_hdr->slid = cb->resolve.port_lid;
+      req_hdr->qpn = cb->dgram_qp[0]->qp_num;
+
+      sgl[w_i].addr = reinterpret_cast<uint64_t>(req_hdr);
       sgl[w_i].length = FLAGS_size;
 
       pkt_stamp++;
