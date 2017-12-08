@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 source $(dirname $0)/../scripts/utils.sh
 source $(dirname $0)/../scripts/mlx_env.sh
+source $(dirname $0)/params.sh
 export HRD_REGISTRY_IP="specialnode.RDMA.fawn.apt.emulab.net"
 
 drop_shm
-
-num_server_threads=1
 
 blue "Reset server QP registry"
 sudo killall memcached
@@ -16,10 +15,10 @@ blue "Starting $num_server_threads server threads"
 
 flags="
 	--num_server_threads $num_server_threads \
-	--dual_port 0 \
+	--dual_port $dual_port \
 	--is_client 0 \
-	--size 32 \
-	--postlist 16
+	--size $size \
+	--postlist $postlist
 "
 
 # Check for non-gdb mode

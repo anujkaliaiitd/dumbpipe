@@ -17,6 +17,12 @@ struct thread_params_t {
   double* tput;
 };
 
+struct req_hdr_t {
+  size_t stamp;   // Increasing counter
+  uint32_t qpn;   // Client QPN
+  uint32_t slid;  // Client LID
+};
+
 DEFINE_uint64(machine_id, std::numeric_limits<size_t>::max(), "Machine ID");
 DEFINE_uint64(num_client_threads, 0, "Number of client threads/machine");
 DEFINE_uint64(num_server_threads, 0, "Number of server threads");

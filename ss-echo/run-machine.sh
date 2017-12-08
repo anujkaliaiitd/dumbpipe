@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 source $(dirname $0)/../scripts/utils.sh
 source $(dirname $0)/../scripts/mlx_env.sh
+source $(dirname $0)/params.sh
 export HRD_REGISTRY_IP="specialnode.RDMA.fawn.apt.emulab.net"
 
 drop_shm
@@ -8,9 +9,6 @@ drop_shm
 # lsync messes up permissions
 executable="../build/ss-echo"
 chmod +x $executable
-
-num_client_threads=1 # Threads per client machine
-num_server_threads=1 # Total server threads     
 
 blue "Running $num_client_threads client threads"
 
@@ -30,10 +28,10 @@ fi
 flags="\
   --num_client_threads $num_client_threads \
   --num_server_threads $num_server_threads \
-	--dual_port 0 \
-  --postlist 16 \
+	--dual_port $dual_port \
+  --postlist $postlist \
 	--is_client 1 \
-  --size 32 \
+  --size $size \
 	--machine_id $1
 "
 
