@@ -71,12 +71,23 @@ void thread_func(size_t thread_id) {
   cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
   printf("Thread %zu: Listening\n", thread_id);
+  size_t last_buffer = 0;
   while (true) {
-    for (size_t i = 0; i < kRQDepth; i++) {
+    for (size_t i = last_buffer; i < kRQDepth; i++) {
       uint8_t* buf = &ring[i * kStrideBytes];
       auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
       if (data_hdr->seq_num > 0) {
-        printf("Buffer %zu is filled. Seq num = %zu\n", i, data_hdr->seq_num);
+        printf("Thread %zu: Buf %zu filled. Seq = %zu, receiver thread = %zu\n",
+               thread_id, i, data_hdr->seq_num, data_hdr->receiver_thread);
+        last_buffer = i;
+        assert(data_hdr->receiver_thread == thread_id);
+      }
+
+      if (last_buffer == kRQDepth - 1) {
+        last_buffer = 0;
+        memset(ring, 0, ring_size);
+        printf("Posting RECV again\n");
+        cb->wq_family->recv_burst(cb->wq, &sge, 1);
       }
     }
     usleep(200);

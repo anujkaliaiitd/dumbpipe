@@ -27,7 +27,7 @@ static constexpr size_t kStrideBytes = (1ull << kLogStrideBytes);
 static constexpr uint16_t kIPEtherType = 0x800;
 static constexpr uint16_t kIPHdrProtocol = 0x11;
 
-static constexpr size_t kReceiverThreads = 1;
+static constexpr size_t kReceiverThreads = 2;
 
 uint8_t kDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
 char kDstIP[] = "192.168.1.250";
