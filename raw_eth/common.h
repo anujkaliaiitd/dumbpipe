@@ -20,7 +20,9 @@ static constexpr size_t kSQDepth = 512;
 static constexpr size_t kRQDepth = 512;
 
 static constexpr size_t kLogNumStrides = 9;
-static constexpr size_t kLogStrideBytes = 6;
+static constexpr size_t kLogStrideBytes = 10;
+static constexpr size_t kNumStrides = (1ull << kLogNumStrides);
+static constexpr size_t kStrideBytes = (1ull << kLogStrideBytes);
 
 static constexpr uint16_t kIPEtherType = 0x800;
 static constexpr uint16_t kIPHdrProtocol = 0x11;
@@ -246,7 +248,7 @@ ctrl_blk_t* init_ctx_mp_rq(size_t device_index) {
   memset(&wq_init_attr, 0, sizeof(wq_init_attr));
 
   wq_init_attr.wq_type = IBV_EXP_WQT_RQ;
-  wq_init_attr.max_recv_wr = kRQDepth;
+  wq_init_attr.max_recv_wr = 1;
   wq_init_attr.max_recv_sge = 1;
   wq_init_attr.pd = cb->pd;
   wq_init_attr.cq = cb->recv_cq;

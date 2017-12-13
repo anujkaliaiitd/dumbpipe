@@ -54,6 +54,7 @@ void thread_func(size_t thread_id) {
   // Register RX ring memory
   size_t ring_size = kRecvBufSize * kRQDepth;
   uint8_t* ring = new uint8_t[ring_size];
+  memset(ring, 0, ring_size);
 
   struct ibv_mr* mr =
       ibv_reg_mr(cb->pd, ring, ring_size, IBV_ACCESS_LOCAL_WRITE);
@@ -62,34 +63,23 @@ void thread_func(size_t thread_id) {
   struct ibv_sge sge;
   sge.addr = reinterpret_cast<uint64_t>(ring);
   sge.lkey = mr->lkey;
-  sge.length = (1ull << kLogNumStrides) * (1ull << kLogStrideBytes);
+  sge.length = kNumStrides * kStrideBytes;
+
   assert(ring_size >= sge.length);
+  static_assert(kStrideBytes > (kTotHdrSz + kDataSize + 4), "");
+
   cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
   printf("Thread %zu: Listening\n", thread_id);
-  size_t ring_head = 0;
   while (true) {
-    struct ibv_wc wc;
-    int ret = ibv_poll_cq(cb->recv_cq, 1, &wc);
-    assert(ret >= 0);
-    if (ret == 0) continue;
-    size_t num_comps = static_cast<size_t>(ret);
-
-    for (size_t i = 0; i < num_comps; i++) {
-      uint8_t* buf = &ring[ring_head * kRecvBufSize];
-      auto* udp_hdr = reinterpret_cast<udp_hdr_t*>(buf + sizeof(eth_hdr_t) +
-                                                   sizeof(ipv4_hdr_t));
+    for (size_t i = 0; i < kRQDepth; i++) {
+      uint8_t* buf = &ring[i * kStrideBytes];
       auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
-      printf("Thread %zu: Message %s received, udp dst port = %u\n", thread_id,
-             data_hdr->to_string().c_str(), ntohs(udp_hdr->dst_port));
-
-      assert(data_hdr->receiver_thread == thread_id);
-
-      sge.addr = reinterpret_cast<uint64_t>(buf);
-      assert(ret == 0);
-
-      ring_head = (ring_head + 1) % kRQDepth;
+      if (data_hdr->seq_num > 0) {
+        printf("Buffer %zu is filled. Seq num = %zu\n", i, data_hdr->seq_num);
+      }
     }
+    usleep(200);
   }
 }
 
