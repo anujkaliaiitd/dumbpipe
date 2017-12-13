@@ -39,8 +39,12 @@ struct ctrl_blk_t {
   struct ibv_pd* pd;
   struct ibv_cq* send_cq;
   struct ibv_cq* recv_cq;
-  struct ibv_exp_wq* wq;
   struct ibv_qp* qp;
+
+  // For multi-packet RECV queue
+  struct ibv_exp_wq* wq;
+  struct ibv_exp_wq_family* wq_family;
+  struct ibv_exp_rwq_ind_table* ind_tbl;
 };
 
 struct eth_hdr_t {
@@ -174,6 +178,7 @@ ctrl_blk_t* init_ctx_common(size_t device_index) {
 }
 
 ctrl_blk_t* init_ctx_non_mp_rq(size_t device_index) {
+  printf("Creating control block without MP RQ.\n");
   auto* cb = init_ctx_common(device_index);
   assert(cb->context != nullptr && cb->pd != nullptr &&
          cb->send_cq != nullptr && cb->recv_cq != nullptr);
@@ -216,6 +221,91 @@ ctrl_blk_t* init_ctx_non_mp_rq(size_t device_index) {
   qp_attr.qp_state = IBV_QPS_RTS;
   ret = ibv_exp_modify_qp(cb->qp, &qp_attr, IBV_QP_STATE);
   assert(ret >= 0);
+
+  return cb;
+}
+
+ctrl_blk_t* init_ctx_mp_rq(size_t device_index) {
+  printf("Creating control block with MP RQ.\n");
+  auto* cb = init_ctx_common(device_index);
+  assert(cb->context != nullptr && cb->pd != nullptr &&
+         cb->send_cq != nullptr && cb->recv_cq != nullptr);
+
+  uint8_t toeplitz_key[] = {0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
+                            0x41, 0x67, 0x25, 0x3d, 0x43, 0xa3, 0x8f, 0xb0,
+                            0xd0, 0xca, 0x2b, 0xcb, 0xae, 0x7b, 0x30, 0xb4,
+                            0x77, 0xcb, 0x2d, 0xa3, 0x80, 0x30, 0xf2, 0x0c,
+                            0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa};
+  const int TOEPLITZ_RX_HASH_KEY_LEN =
+      sizeof(toeplitz_key) / sizeof(toeplitz_key[0]);
+
+  struct ibv_exp_wq_init_attr wq_init_attr;
+  memset(&wq_init_attr, 0, sizeof(wq_init_attr));
+
+  wq_init_attr.wq_type = IBV_EXP_WQT_RQ;
+  wq_init_attr.max_recv_wr = kRQDepth;
+  wq_init_attr.max_recv_sge = 1;
+  wq_init_attr.pd = cb->pd;
+  wq_init_attr.cq = cb->recv_cq;
+
+  wq_init_attr.comp_mask |= IBV_EXP_CREATE_WQ_MP_RQ;
+  wq_init_attr.mp_rq.use_shift = IBV_EXP_MP_RQ_NO_SHIFT;
+  wq_init_attr.mp_rq.single_wqe_log_num_of_strides = 9;
+  wq_init_attr.mp_rq.single_stride_log_num_of_bytes = 6;
+  cb->wq = ibv_exp_create_wq(cb->context, &wq_init_attr);
+  assert(cb->wq != nullptr);
+
+  // Change WQ to ready state
+  struct ibv_exp_wq_attr wq_attr;
+  memset(&wq_attr, 0, sizeof(wq_attr));
+  wq_attr.attr_mask = IBV_EXP_WQ_ATTR_STATE;
+  wq_attr.wq_state = IBV_EXP_WQS_RDY;
+
+  int ret = ibv_exp_modify_wq(cb->wq, &wq_attr);
+  assert(ret == 0);
+
+  enum ibv_exp_query_intf_status intf_status = IBV_EXP_INTF_STAT_OK;
+  struct ibv_exp_query_intf_params query_intf_params;
+  memset(&query_intf_params, 0, sizeof(query_intf_params));
+  query_intf_params.intf_scope = IBV_EXP_INTF_GLOBAL;
+  query_intf_params.intf = IBV_EXP_INTF_WQ;
+  query_intf_params.obj = cb->wq;
+  cb->wq_family = reinterpret_cast<struct ibv_exp_wq_family*>(
+      ibv_exp_query_intf(cb->context, &query_intf_params, &intf_status));
+  assert(cb->wq_family != nullptr);
+
+  // Create indirect table
+  struct ibv_exp_rwq_ind_table_init_attr rwq_ind_table_init_attr;
+  memset(&rwq_ind_table_init_attr, 0, sizeof(rwq_ind_table_init_attr));
+  rwq_ind_table_init_attr.pd = cb->pd;
+  rwq_ind_table_init_attr.log_ind_tbl_size = 0;  // Ignore hash
+  rwq_ind_table_init_attr.ind_tbl = &cb->wq;     // Pointer to RECV work queue
+  rwq_ind_table_init_attr.comp_mask = 0;
+  cb->ind_tbl =
+      ibv_exp_create_rwq_ind_table(cb->context, &rwq_ind_table_init_attr);
+  assert(cb->ind_tbl != nullptr);
+
+  // Create rx_hash_conf and indirection table for the QP
+  struct ibv_exp_rx_hash_conf rx_hash_conf;
+  memset(&rx_hash_conf, 0, sizeof(rx_hash_conf));
+  rx_hash_conf.rx_hash_function = IBV_EXP_RX_HASH_FUNC_TOEPLITZ;
+  rx_hash_conf.rx_hash_key_len = TOEPLITZ_RX_HASH_KEY_LEN;
+  rx_hash_conf.rx_hash_key = toeplitz_key;
+  rx_hash_conf.rx_hash_fields_mask = IBV_EXP_RX_HASH_DST_PORT_UDP;
+  rx_hash_conf.rwq_ind_tbl = cb->ind_tbl;
+
+  struct ibv_exp_qp_init_attr exp_qp_init_attr;
+  memset(&exp_qp_init_attr, 0, sizeof(exp_qp_init_attr));
+  exp_qp_init_attr.comp_mask = IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS |
+                               IBV_EXP_QP_INIT_ATTR_PD |
+                               IBV_EXP_QP_INIT_ATTR_RX_HASH;
+  exp_qp_init_attr.rx_hash_conf = &rx_hash_conf;
+  exp_qp_init_attr.pd = cb->pd;
+  exp_qp_init_attr.qp_type = IBV_QPT_RAW_PACKET;
+
+  // Create the QP
+  cb->qp = ibv_exp_create_qp(cb->context, &exp_qp_init_attr);
+  assert(cb->qp != nullptr);
 
   return cb;
 }

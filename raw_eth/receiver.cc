@@ -45,7 +45,7 @@ void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
 }
 
 void thread_func(size_t thread_id) {
-  ctrl_blk_t* cb = init_ctx_non_mp_rq(kDeviceIndex);
+  ctrl_blk_t* cb = init_ctx_mp_rq(kDeviceIndex);
 
   uint16_t dst_port = static_cast<uint16_t>(kBaseDstPort + thread_id);
   printf("Thread %zu listening on port %u\n", thread_id, dst_port);
