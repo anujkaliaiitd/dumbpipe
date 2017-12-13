@@ -59,21 +59,12 @@ void thread_func(size_t thread_id) {
       ibv_reg_mr(cb->pd, ring, ring_size, IBV_ACCESS_LOCAL_WRITE);
   assert(mr != nullptr);
 
-  // Attach all buffers to the ring
   struct ibv_sge sge;
-  sge.length = kRecvBufSize;
+  sge.addr = reinterpret_cast<uint64_t>(ring);
   sge.lkey = mr->lkey;
-
-  struct ibv_recv_wr wr, *bad_wr;
-  wr.num_sge = 1;
-  wr.sg_list = &sge;
-  wr.next = nullptr;
-
-  for (size_t i = 0; i < kRQDepth; i++) {
-    sge.addr = reinterpret_cast<uint64_t>(ring) + (kRecvBufSize * i);
-    int ret = ibv_post_recv(cb->qp, &wr, &bad_wr);
-    assert(ret == 0);
-  }
+  sge.length = (1ull << kLogNumStrides) * (1ull << kLogStrideBytes);
+  assert(ring_size >= sge.length);
+  cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
   printf("Thread %zu: Listening\n", thread_id);
   size_t ring_head = 0;
@@ -95,7 +86,6 @@ void thread_func(size_t thread_id) {
       assert(data_hdr->receiver_thread == thread_id);
 
       sge.addr = reinterpret_cast<uint64_t>(buf);
-      ret = ibv_post_recv(cb->qp, &wr, &bad_wr);
       assert(ret == 0);
 
       ring_head = (ring_head + 1) % kRQDepth;

@@ -19,10 +19,13 @@ static_assert(kDataSize % sizeof(size_t) == 0, "");
 static constexpr size_t kSQDepth = 512;
 static constexpr size_t kRQDepth = 512;
 
+static constexpr size_t kLogNumStrides = 9;
+static constexpr size_t kLogStrideBytes = 6;
+
 static constexpr uint16_t kIPEtherType = 0x800;
 static constexpr uint16_t kIPHdrProtocol = 0x11;
 
-static constexpr size_t kReceiverThreads = 2;
+static constexpr size_t kReceiverThreads = 1;
 
 uint8_t kDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
 char kDstIP[] = "192.168.1.250";
@@ -250,8 +253,8 @@ ctrl_blk_t* init_ctx_mp_rq(size_t device_index) {
 
   wq_init_attr.comp_mask |= IBV_EXP_CREATE_WQ_MP_RQ;
   wq_init_attr.mp_rq.use_shift = IBV_EXP_MP_RQ_NO_SHIFT;
-  wq_init_attr.mp_rq.single_wqe_log_num_of_strides = 9;
-  wq_init_attr.mp_rq.single_stride_log_num_of_bytes = 6;
+  wq_init_attr.mp_rq.single_wqe_log_num_of_strides = kLogNumStrides;
+  wq_init_attr.mp_rq.single_stride_log_num_of_bytes = kLogStrideBytes;
   cb->wq = ibv_exp_create_wq(cb->context, &wq_init_attr);
   assert(cb->wq != nullptr);
 
