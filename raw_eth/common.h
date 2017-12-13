@@ -34,12 +34,13 @@ char kSrcIP[] = "192.168.1.251";
 static constexpr uint16_t kBaseDstPort = 3185;
 
 struct ctrl_blk_t {
-  struct ibv_device *ib_dev;
-  struct ibv_context *context;
-  struct ibv_pd *pd;
-  struct ibv_cq *send_cq;
-  struct ibv_cq *recv_cq;
-  struct ibv_qp *qp;
+  struct ibv_device* ib_dev;
+  struct ibv_context* context;
+  struct ibv_pd* pd;
+  struct ibv_cq* send_cq;
+  struct ibv_cq* recv_cq;
+  struct ibv_exp_wq* wq;
+  struct ibv_qp* qp;
 };
 
 struct eth_hdr_t {
@@ -88,16 +89,16 @@ struct data_hdr_t {
 };
 static_assert(sizeof(data_hdr_t) == kDataSize, "");
 
-uint32_t ip_from_str(char *ip) {
+uint32_t ip_from_str(char* ip) {
   uint32_t addr;
   int ret = inet_pton(AF_INET, ip, &addr);
   assert(ret == 1);
   return addr;
 }
 
-static uint16_t ip_checksum(ipv4_hdr_t *ipv4_hdr) {
+static uint16_t ip_checksum(ipv4_hdr_t* ipv4_hdr) {
   unsigned long sum = 0;
-  const uint16_t *ip1 = reinterpret_cast<uint16_t *>(ipv4_hdr);
+  const uint16_t* ip1 = reinterpret_cast<uint16_t*>(ipv4_hdr);
 
   size_t hdr_len = sizeof(ipv4_hdr_t);
   while (hdr_len > 1) {
@@ -110,14 +111,14 @@ static uint16_t ip_checksum(ipv4_hdr_t *ipv4_hdr) {
   return (~sum);
 }
 
-void gen_eth_header(eth_hdr_t *eth_header, uint8_t *src_mac, uint8_t *dst_mac,
+void gen_eth_header(eth_hdr_t* eth_header, uint8_t* src_mac, uint8_t* dst_mac,
                     uint16_t eth_type) {
   memcpy(eth_header->src_mac, src_mac, 6);
   memcpy(eth_header->dst_mac, dst_mac, 6);
   eth_header->eth_type = htons(eth_type);
 }
 
-void gen_ipv4_header(ipv4_hdr_t *ipv4_hdr, uint32_t src_ip, uint32_t dst_ip,
+void gen_ipv4_header(ipv4_hdr_t* ipv4_hdr, uint32_t src_ip, uint32_t dst_ip,
                      uint8_t protocol, uint16_t data_size) {
   ipv4_hdr->version = 4;
   ipv4_hdr->ihl = 5;
@@ -132,7 +133,7 @@ void gen_ipv4_header(ipv4_hdr_t *ipv4_hdr, uint32_t src_ip, uint32_t dst_ip,
   ipv4_hdr->check = ip_checksum(ipv4_hdr);
 }
 
-void gen_udp_header(udp_hdr_t *udp_hdr, uint16_t src_port, uint16_t dst_port,
+void gen_udp_header(udp_hdr_t* udp_hdr, uint16_t src_port, uint16_t dst_port,
                     uint16_t data_size) {
   udp_hdr->src_port = htons(src_port);
   udp_hdr->dst_port = htons(dst_port);
@@ -140,11 +141,12 @@ void gen_udp_header(udp_hdr_t *udp_hdr, uint16_t src_port, uint16_t dst_port,
   udp_hdr->sum = 0;
 }
 
-ctrl_blk_t *init_ctx(size_t device_index) {
-  auto *cb = new ctrl_blk_t();
+// Create device context, PD, and CQs
+ctrl_blk_t* init_ctx_common(size_t device_index) {
+  auto* cb = new ctrl_blk_t();
   memset(cb, 0, sizeof(ctrl_blk_t));
 
-  struct ibv_device **dev_list = ibv_get_device_list(nullptr);
+  struct ibv_device** dev_list = ibv_get_device_list(nullptr);
   assert(dev_list != nullptr);
 
   cb->ib_dev = dev_list[device_index];
@@ -167,6 +169,14 @@ ctrl_blk_t *init_ctx(size_t device_index) {
   cb->recv_cq = ibv_exp_create_cq(cb->context, kRQDepth, nullptr, nullptr, 0,
                                   &cq_init_attr);
   assert(cb->recv_cq != nullptr);
+
+  return cb;
+}
+
+ctrl_blk_t* init_ctx_non_mp_rq(size_t device_index) {
+  auto* cb = init_ctx_common(device_index);
+  assert(cb->context != nullptr && cb->pd != nullptr &&
+         cb->send_cq != nullptr && cb->recv_cq != nullptr);
 
   struct ibv_exp_qp_init_attr qp_init_attr;
   memset(&qp_init_attr, 0, sizeof(qp_init_attr));
