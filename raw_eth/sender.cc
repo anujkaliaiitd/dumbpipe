@@ -18,7 +18,7 @@ void format_packet(uint8_t* buf) {
 }
 
 int main() {
-  ctrl_blk_t* cb = init_ctx_non_mp_rq(kDeviceIndex);
+  ctrl_blk_t* cb = init_ctx(kDeviceIndex);
   FastRand fast_rand;
 
   uint8_t packet[kTotHdrSz + kDataSize] = {0};
@@ -59,7 +59,7 @@ int main() {
     data_hdr->seq_num = seq_num[dst_thread_idx]++;
 
     struct ibv_send_wr* bad_wr;
-    int ret = ibv_post_send(cb->qp, &wr, &bad_wr);
+    int ret = ibv_post_send(cb->send_qp, &wr, &bad_wr);
     if (ret < 0) {
       fprintf(stderr, "Failed in post send\n");
       exit(1);

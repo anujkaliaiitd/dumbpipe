@@ -45,11 +45,11 @@ void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
 }
 
 void thread_func(size_t thread_id) {
-  ctrl_blk_t* cb = init_ctx_mp_rq(kDeviceIndex);
+  ctrl_blk_t* cb = init_ctx(kDeviceIndex);
 
   uint16_t dst_port = static_cast<uint16_t>(kBaseDstPort + thread_id);
   printf("Thread %zu listening on port %u\n", thread_id, dst_port);
-  install_flow_rule(cb->qp, dst_port);
+  install_flow_rule(cb->recv_qp, dst_port);
 
   // Register RX ring memory
   uint8_t* ring = new uint8_t[kRingSize];
@@ -87,7 +87,7 @@ void thread_func(size_t thread_id) {
       nb_rx++;
     }
 
-    if (nb_rx == 100000) {
+    if (nb_rx == 1000000) {
       clock_gettime(CLOCK_REALTIME, &end);
       double sec = (end.tv_sec - start.tv_sec) +
                    (end.tv_nsec - start.tv_nsec) / 1000000000.0;
