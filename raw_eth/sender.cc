@@ -39,9 +39,10 @@ int main() {
   wr.next = nullptr;
   wr.opcode = IBV_WR_SEND;
 
-  size_t seq_num[kReceiverThreads] = {0};
-  size_t nb_tx = 0;
+  size_t seq_num[kReceiverThreads];
+  for (auto& s : seq_num) s = 1;
 
+  size_t nb_tx = 0;
   while (true) {
     wr.send_flags = IBV_SEND_INLINE;
     wr.wr_id = static_cast<size_t>(nb_tx);
