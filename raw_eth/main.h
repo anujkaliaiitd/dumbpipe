@@ -1,4 +1,8 @@
+#ifndef MAIN_H
+#define MAIN_H
+
 #include <assert.h>
+#include <gflags/gflags.h>
 #include <infiniband/verbs_exp.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,35 +14,40 @@
 
 #include "inet_hdrs.h"
 #include "mlx5_defs.h"
+#include "libhrd_cpp/hrd.h"
 
-static constexpr size_t kReceiverThreads = 1;
-static constexpr bool kVerbose = true;
+DEFINE_uint64(machine_id, std::numeric_limits<size_t>::max(), "Machine ID");
+DEFINE_uint64(num_client_threads, 0, "Number of client threads/machine");
+DEFINE_uint64(num_server_threads, 0, "Number of server threads");
+DEFINE_uint64(is_client, 0, "Is this process a client?");
+DEFINE_uint64(dual_port, 0, "Use two ports?");
+DEFINE_uint64(size, 0, "RDMA size");
+DEFINE_uint64(postlist, std::numeric_limits<size_t>::max(), "Postlist size");
 
-static constexpr size_t kDeviceIndex = 2;
-static constexpr size_t kPortIndex = 2;  // mlx5_0
-static constexpr size_t kDataSize = 32;  // Data size, without headers
-static_assert(kDataSize % sizeof(size_t) == 0, "");
+static constexpr bool kAppVerbose = true;
+static constexpr size_t kAppMaxPostlist = 64;
+static constexpr size_t kAppUnsigBatch = 64;
 
-static constexpr size_t kSQDepth = 128;
-static constexpr size_t kRQDepth = 2;  // Multi-packet RQ depth
-static_assert(kRQDepth <= 4, "");      // Double check - RQ must be small
+static constexpr size_t kAppDeviceIndex = 2;
+static constexpr size_t kAppPortIndex = 2;  // mlx5_0
 
-static constexpr size_t kLogNumStrides = 9;
-static constexpr size_t kLogStrideBytes = 10;
-static constexpr size_t kNumRingEntries = (1ull << kLogNumStrides);
-static constexpr size_t kRingMbufSize = (1ull << kLogStrideBytes);
-static constexpr size_t kRingSize = (kNumRingEntries * kRingMbufSize);
+static constexpr size_t kAppSQDepth = 128;
+static constexpr size_t kAppRQDepth = 2;  // Multi-packet RQ depth
+static_assert(kAppRQDepth <= 4, "");      // Double check - RQ must be small
 
-static constexpr uint16_t kIPEtherType = 0x800;
-static constexpr uint16_t kIPHdrProtocol = 0x11;
+static constexpr size_t kAppLogNumStrides = 9;
+static constexpr size_t kAppLogStrideBytes = 10;
+static constexpr size_t kAppNumRingEntries = (1ull << kAppLogNumStrides);
+static constexpr size_t kAppRingMbufSize = (1ull << kAppLogStrideBytes);
+static constexpr size_t kAppRingSize = (kAppNumRingEntries * kAppRingMbufSize);
 
-uint8_t kDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
-char kDstIP[] = "192.168.1.250";
+uint8_t kAppDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
+char kAppDstIP[] = "192.168.1.250";
 
-uint8_t kSrcMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xe6};
-char kSrcIP[] = "192.168.1.251";
+uint8_t kAppSrcMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xe6};
+char kAppSrcIP[] = "192.168.1.251";
 
-// Receiver thread i uses port (kBaseDstPort + i)
+// Server thread i uses UDP port (kBaseDstPort + i)
 static constexpr uint16_t kBaseDstPort = 3185;
 
 struct ctrl_blk_t {
@@ -56,29 +65,32 @@ struct ctrl_blk_t {
   struct ibv_exp_rwq_ind_table* ind_tbl;
 };
 
-static_assert(kRingMbufSize >= (kTotHdrSz + kDataSize + 4), "");
+struct thread_params_t {
+  size_t id;
+  double *tput;
+
+  thread_params_t(size_t id, double *tput) : id(id), tput(tput) {}
+};
 
 // User-defined data header
 struct data_hdr_t {
-  size_t receiver_thread;  // The receiver thread that's the target
+  size_t server_thread;  // The server thread that's the target
   size_t seq_num;          // Sequence number to this receiver
-  uint8_t pad[kDataSize - 2 * sizeof(size_t)];
 
   std::string to_string() {
     std::ostringstream ret;
-    ret << "[Receiver thread " << std::to_string(receiver_thread)
+    ret << "[Server thread " << std::to_string(server_thread)
         << ", seq num " << std::to_string(seq_num) << "]";
     return ret.str();
   }
 };
-static_assert(sizeof(data_hdr_t) == kDataSize, "");
 
 void init_send_qp(ctrl_blk_t* cb) {
   assert(cb->context != nullptr && cb->pd != nullptr);
 
   struct ibv_exp_cq_init_attr cq_init_attr;
   memset(&cq_init_attr, 0, sizeof(cq_init_attr));
-  cb->send_cq = ibv_exp_create_cq(cb->context, kSQDepth, nullptr, nullptr, 0,
+  cb->send_cq = ibv_exp_create_cq(cb->context, kAppSQDepth, nullptr, nullptr, 0,
                                   &cq_init_attr);
   assert(cb->send_cq != nullptr);
 
@@ -90,7 +102,7 @@ void init_send_qp(ctrl_blk_t* cb) {
   qp_init_attr.pd = cb->pd;
   qp_init_attr.send_cq = cb->send_cq;
   qp_init_attr.recv_cq = cb->send_cq;  // We won't post RECVs
-  qp_init_attr.cap.max_send_wr = kSQDepth;
+  qp_init_attr.cap.max_send_wr = kAppSQDepth;
   qp_init_attr.cap.max_inline_data = 512;
   qp_init_attr.qp_type = IBV_QPT_RAW_PACKET;
   qp_init_attr.exp_create_flags |= IBV_EXP_QP_CREATE_SCATTER_FCS;
@@ -139,15 +151,15 @@ void init_recv_qp(ctrl_blk_t* cb) {
   memset(&wq_init_attr, 0, sizeof(wq_init_attr));
 
   wq_init_attr.wq_type = IBV_EXP_WQT_RQ;
-  wq_init_attr.max_recv_wr = kRQDepth;
+  wq_init_attr.max_recv_wr = kAppRQDepth;
   wq_init_attr.max_recv_sge = 1;
   wq_init_attr.pd = cb->pd;
   wq_init_attr.cq = cb->recv_cq;
 
   wq_init_attr.comp_mask |= IBV_EXP_CREATE_WQ_MP_RQ;
   wq_init_attr.mp_rq.use_shift = IBV_EXP_MP_RQ_NO_SHIFT;
-  wq_init_attr.mp_rq.single_wqe_log_num_of_strides = kLogNumStrides;
-  wq_init_attr.mp_rq.single_stride_log_num_of_bytes = kLogStrideBytes;
+  wq_init_attr.mp_rq.single_wqe_log_num_of_strides = kAppLogNumStrides;
+  wq_init_attr.mp_rq.single_stride_log_num_of_bytes = kAppLogStrideBytes;
   cb->wq = ibv_exp_create_wq(cb->context, &wq_init_attr);
   assert(cb->wq != nullptr);
 
@@ -234,3 +246,5 @@ ctrl_blk_t* init_ctx(size_t device_index) {
 
   return cb;
 }
+
+#endif  // MAIN_H

@@ -1,4 +1,4 @@
-#include "common.h"
+#include "main.h"
 #include "mlx5_defs.h"
 
 // Install a UDP destination port--based flow rule
@@ -45,26 +45,27 @@ void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
   assert(flow != nullptr);
 }
 
-void thread_func(size_t thread_id) {
-  ctrl_blk_t* cb = init_ctx(kDeviceIndex);
+void run_server(thread_params_t params) {
+  size_t thread_id = params.id;
+  ctrl_blk_t* cb = init_ctx(kAppDeviceIndex);
 
   uint16_t dst_port = static_cast<uint16_t>(kBaseDstPort + thread_id);
   printf("Thread %zu listening on port %u\n", thread_id, dst_port);
   install_flow_rule(cb->recv_qp, dst_port);
 
   // Register RX ring memory
-  uint8_t* ring = new uint8_t[kRingSize];
-  memset(ring, 0, kRingSize);
+  uint8_t* ring = new uint8_t[kAppRingSize];
+  memset(ring, 0, kAppRingSize);
 
   struct ibv_mr* mr =
-      ibv_reg_mr(cb->pd, ring, kRingSize, IBV_ACCESS_LOCAL_WRITE);
+      ibv_reg_mr(cb->pd, ring, kAppRingSize, IBV_ACCESS_LOCAL_WRITE);
   assert(mr != nullptr);
 
+  // The multi-packet RECV
   struct ibv_sge sge;
   sge.addr = reinterpret_cast<uint64_t>(ring);
   sge.lkey = mr->lkey;
-  sge.length = kRingSize;
-
+  sge.length = kAppRingSize;
   cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
   printf("Thread %zu: Listening\n", thread_id);
@@ -77,11 +78,11 @@ void thread_func(size_t thread_id) {
 
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
-    uint8_t* buf = &ring[cur_buf * kRingMbufSize];
+    uint8_t* buf = &ring[cur_buf * kAppRingMbufSize];
     auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
     if (data_hdr->seq_num > 0) {
       usleep(200);  // Let the CQE be DMA-ed
-      if (kVerbose) {
+      if (kAppVerbose) {
         printf(
             "Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu. "
             " ctr_0 = %u, ctr_1 = %u\n",
@@ -90,7 +91,7 @@ void thread_func(size_t thread_id) {
         // usleep(200);
       }
 
-      assert(data_hdr->receiver_thread == thread_id);
+      assert(data_hdr->server_thread == thread_id);
       data_hdr->seq_num = 0;
       cur_buf++;
       nb_rx++;
@@ -106,20 +107,10 @@ void thread_func(size_t thread_id) {
       nb_rx = 0;
     }
 
-    if (cur_buf == kNumRingEntries) {
+    if (cur_buf == kAppNumRingEntries) {
       cur_buf = 0;
-      if (kVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
+      if (kAppVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
       cb->wq_family->recv_burst(cb->wq, &sge, 1);
     }
   }
-}
-
-int main() {
-  std::thread thread_arr[kReceiverThreads];
-  for (size_t i = 0; i < kReceiverThreads; i++) {
-    thread_arr[i] = std::thread(thread_func, i);
-  }
-
-  for (auto& t : thread_arr) t.join();
-  return 0;
 }
