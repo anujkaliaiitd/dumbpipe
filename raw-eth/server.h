@@ -40,9 +40,7 @@ void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
   udp_spec->val.dst_port = htons(dst_port);
   udp_spec->mask.dst_port = 0xffffu;
 
-  printf("Create flow for QP %p, dst port %u\n", qp, dst_port);
-  auto* flow = ibv_exp_create_flow(qp, flow_attr);
-  assert(flow != nullptr);
+  rt_assert(ibv_exp_create_flow(qp, flow_attr) != nullptr);
 }
 
 void run_server(thread_params_t params) {

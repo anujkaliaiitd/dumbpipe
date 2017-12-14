@@ -55,6 +55,11 @@ static inline void rt_assert(bool condition, std::string throw_str) {
   if (unlikely(!condition)) throw std::runtime_error(throw_str);
 }
 
+/// Check a condition at runtime. If the condition is false, throw exception.
+static inline void rt_assert(bool condition) {
+  if (unlikely(!condition)) throw std::runtime_error("");
+}
+
 template <typename T>
 static constexpr inline bool is_power_of_two(T x) {
   return x && ((x & T(x - 1)) == 0);

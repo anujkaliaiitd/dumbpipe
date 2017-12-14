@@ -43,6 +43,7 @@ static_assert(kTotHdrSz == 42, "");
 uint32_t ip_from_str(char* ip) {
   uint32_t addr;
   int ret = inet_pton(AF_INET, ip, &addr);
+  ((void)ret);
   assert(ret == 1);
   return addr;
 }

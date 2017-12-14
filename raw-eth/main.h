@@ -13,8 +13,8 @@
 #include <thread>
 
 #include "inet_hdrs.h"
-#include "mlx5_defs.h"
 #include "libhrd_cpp/hrd.h"
+#include "mlx5_defs.h"
 
 DEFINE_uint64(machine_id, std::numeric_limits<size_t>::max(), "Machine ID");
 DEFINE_uint64(num_client_threads, 0, "Number of client threads/machine");
@@ -67,20 +67,20 @@ struct ctrl_blk_t {
 
 struct thread_params_t {
   size_t id;
-  double *tput;
+  double* tput;
 
-  thread_params_t(size_t id, double *tput) : id(id), tput(tput) {}
+  thread_params_t(size_t id, double* tput) : id(id), tput(tput) {}
 };
 
 // User-defined data header
 struct data_hdr_t {
   size_t server_thread;  // The server thread that's the target
-  size_t seq_num;          // Sequence number to this receiver
+  size_t seq_num;        // Sequence number to this receiver
 
   std::string to_string() {
     std::ostringstream ret;
-    ret << "[Server thread " << std::to_string(server_thread)
-        << ", seq num " << std::to_string(seq_num) << "]";
+    ret << "[Server thread " << std::to_string(server_thread) << ", seq num "
+        << std::to_string(seq_num) << "]";
     return ret.str();
   }
 };
@@ -114,19 +114,16 @@ void init_send_qp(ctrl_blk_t* cb) {
   memset(&qp_attr, 0, sizeof(qp_attr));
   qp_attr.qp_state = IBV_QPS_INIT;
   qp_attr.port_num = 1;
-  int ret =
-      ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE | IBV_QP_PORT);
-  assert(ret >= 0);
+  rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr,
+                              IBV_QP_STATE | IBV_QP_PORT) == 0);
 
   memset(&qp_attr, 0, sizeof(qp_attr));
   qp_attr.qp_state = IBV_QPS_RTR;
-  ret = ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE);
-  assert(ret >= 0);
+  rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE) == 0);
 
   memset(&qp_attr, 0, sizeof(qp_attr));
   qp_attr.qp_state = IBV_QPS_RTS;
-  ret = ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE);
-  assert(ret >= 0);
+  rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE) == 0);
 }
 
 void init_recv_qp(ctrl_blk_t* cb) {
@@ -144,8 +141,8 @@ void init_recv_qp(ctrl_blk_t* cb) {
   memset(&cq_attr, 0, sizeof(cq_attr));
   cq_attr.comp_mask = IBV_EXP_CQ_ATTR_CQ_CAP_FLAGS;
   cq_attr.cq_cap_flags = IBV_EXP_CQ_IGNORE_OVERRUN;
-  int ret = ibv_exp_modify_cq(cb->recv_cq, &cq_attr, IBV_EXP_CQ_CAP_FLAGS);
-  assert(ret == 0);
+  rt_assert(ibv_exp_modify_cq(cb->recv_cq, &cq_attr, IBV_EXP_CQ_CAP_FLAGS) ==
+            0);
 
   struct ibv_exp_wq_init_attr wq_init_attr;
   memset(&wq_init_attr, 0, sizeof(wq_init_attr));
@@ -168,8 +165,7 @@ void init_recv_qp(ctrl_blk_t* cb) {
   memset(&wq_attr, 0, sizeof(wq_attr));
   wq_attr.attr_mask = IBV_EXP_WQ_ATTR_STATE;
   wq_attr.wq_state = IBV_EXP_WQS_RDY;
-  ret = ibv_exp_modify_wq(cb->wq, &wq_attr);
-  assert(ret == 0);
+  rt_assert(ibv_exp_modify_wq(cb->wq, &wq_attr) == 0);
 
   // Get the RQ burst function
   enum ibv_exp_query_intf_status intf_status = IBV_EXP_INTF_STAT_OK;

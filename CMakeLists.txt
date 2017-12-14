@@ -14,7 +14,7 @@ add_definitions(-Wno-unused-function)
 add_definitions(-march=native)
 add_definitions(-g)
 
-set(LIBRARIES ${LIBRARIES} rt numa ibverbs pthread gflags papi memcached)
+set(LIBRARIES ${LIBRARIES} rt numa ibverbs pthread gflags memcached)
 
 # Testing
 enable_testing()
@@ -83,7 +83,8 @@ set(HRD_SOURCES
 
 set(BENCHMARKS
   ud-receiver
-  ss-echo)
+  ss-echo
+  raw-eth)
 
 foreach(bench IN LISTS BENCHMARKS)
   add_executable(${bench} ${bench}/main.cc ${HRD_SOURCES})

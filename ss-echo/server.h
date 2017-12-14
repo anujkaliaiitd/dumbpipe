@@ -174,6 +174,7 @@ void cq_polling_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
       // Check the stamp
       auto* req_hdr =
           reinterpret_cast<req_hdr_t*>(sgl[w_i].addr + sizeof(struct ibv_grh));
+      _unused(req_hdr);
       assert(req_hdr->stamp == expected_stamp);
       assert(req_hdr->slid == wc[w_i].slid);
       assert(req_hdr->qpn == wc[w_i].src_qp);

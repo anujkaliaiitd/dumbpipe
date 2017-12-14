@@ -4,7 +4,7 @@
 
 int main(int argc, char* argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  rt_assert(kAppRingMbufSize >= (kTotHdrSz + FLAGS_size + 4), "");
+  rt_assert(kAppRingMbufSize >= (kTotHdrSz + FLAGS_size + 4));
 
   double* tput = nullptr;  // Leaked
 
@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
     // Server does not need to know about number of client threads
     rt_assert(FLAGS_num_client_threads == 0, "Invalid num_client_threads");
     rt_assert(FLAGS_num_server_threads >= 1, "Invalid num_server_threads");
-    rt_assert(FLAGS_machine_id == std::numeric_limits<size_t>::max(), "");
+    rt_assert(FLAGS_machine_id == std::numeric_limits<size_t>::max());
 
     tput = new double[FLAGS_num_server_threads];
     for (size_t i = 0; i < FLAGS_num_server_threads; i++) tput[i] = 0;
