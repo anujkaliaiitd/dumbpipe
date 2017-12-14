@@ -52,21 +52,17 @@ void thread_func(size_t thread_id) {
   install_flow_rule(cb->qp, dst_port);
 
   // Register RX ring memory
-  size_t ring_size = kRecvBufSize * kRQDepth;
-  uint8_t* ring = new uint8_t[ring_size];
-  memset(ring, 0, ring_size);
+  uint8_t* ring = new uint8_t[kRingSize];
+  memset(ring, 0, kRingSize);
 
   struct ibv_mr* mr =
-      ibv_reg_mr(cb->pd, ring, ring_size, IBV_ACCESS_LOCAL_WRITE);
+      ibv_reg_mr(cb->pd, ring, kRingSize, IBV_ACCESS_LOCAL_WRITE);
   assert(mr != nullptr);
 
   struct ibv_sge sge;
   sge.addr = reinterpret_cast<uint64_t>(ring);
   sge.lkey = mr->lkey;
-  sge.length = kNumStrides * kStrideBytes;
-
-  assert(ring_size >= sge.length);
-  static_assert(kStrideBytes > (kTotHdrSz + kDataSize + 4), "");
+  sge.length = kRingSize;
 
   cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
@@ -75,9 +71,8 @@ void thread_func(size_t thread_id) {
   struct timespec start, end;
 
   clock_gettime(CLOCK_REALTIME, &start);
-
   while (true) {
-    uint8_t* buf = &ring[cur_buf * kStrideBytes];
+    uint8_t* buf = &ring[cur_buf * kRingMbufSize];
     auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
     if (data_hdr->seq_num > 0) {
       if (kVerbose) {
@@ -102,7 +97,7 @@ void thread_func(size_t thread_id) {
       nb_rx = 0;
     }
 
-    if (cur_buf == kNumStrides) {
+    if (cur_buf == kNumRingEntries) {
       cur_buf = 0;
       if (kVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
       cb->wq_family->recv_burst(cb->wq, &sge, 1);
@@ -117,7 +112,5 @@ int main() {
   }
 
   for (auto& t : thread_arr) t.join();
-
-  printf("We are done\n");
   return 0;
 }

@@ -14,18 +14,19 @@ static constexpr size_t kReceiverThreads = 2;
 static constexpr bool kVerbose = false;
 
 static constexpr size_t kDeviceIndex = 2;
-static constexpr size_t kPortIndex = 2;       // mlx5_0
-static constexpr size_t kDataSize = 32;       // Data size, without headers
-static constexpr size_t kRecvBufSize = 1500;  // RECV buffer size
+static constexpr size_t kPortIndex = 2;  // mlx5_0
+static constexpr size_t kDataSize = 32;  // Data size, without headers
 static_assert(kDataSize % sizeof(size_t) == 0, "");
 
 static constexpr size_t kSQDepth = 512;
 static constexpr size_t kRQDepth = 512;
+static constexpr size_t kMpRQDepth = 1;
 
 static constexpr size_t kLogNumStrides = 9;
 static constexpr size_t kLogStrideBytes = 10;
-static constexpr size_t kNumStrides = (1ull << kLogNumStrides);
-static constexpr size_t kStrideBytes = (1ull << kLogStrideBytes);
+static constexpr size_t kNumRingEntries = (1ull << kLogNumStrides);
+static constexpr size_t kRingMbufSize = (1ull << kLogStrideBytes);
+static constexpr size_t kRingSize = (kNumRingEntries * kRingMbufSize);
 
 static constexpr uint16_t kIPEtherType = 0x800;
 static constexpr uint16_t kIPHdrProtocol = 0x11;
@@ -82,7 +83,9 @@ struct udp_hdr_t {
 
 static constexpr size_t kTotHdrSz =
     sizeof(eth_hdr_t) + sizeof(ipv4_hdr_t) + sizeof(udp_hdr_t);
+
 static_assert(kTotHdrSz == 42, "");
+static_assert(kRingMbufSize >= (kTotHdrSz + kDataSize + 4), "");
 
 // User-defined data header
 struct data_hdr_t {
@@ -175,8 +178,8 @@ ctrl_blk_t* init_ctx_common(size_t device_index) {
                                   &cq_init_attr);
   assert(cb->send_cq != nullptr);
 
-  cb->recv_cq =
-      ibv_exp_create_cq(cb->context, 1, nullptr, nullptr, 0, &cq_init_attr);
+  cb->recv_cq = ibv_exp_create_cq(cb->context, kMpRQDepth, nullptr, nullptr, 0,
+                                  &cq_init_attr);
   assert(cb->recv_cq != nullptr);
 
   // Modify the RECV CQ to ignore overrun
@@ -256,7 +259,7 @@ ctrl_blk_t* init_ctx_mp_rq(size_t device_index) {
   memset(&wq_init_attr, 0, sizeof(wq_init_attr));
 
   wq_init_attr.wq_type = IBV_EXP_WQT_RQ;
-  wq_init_attr.max_recv_wr = 1;
+  wq_init_attr.max_recv_wr = kMpRQDepth;
   wq_init_attr.max_recv_sge = 1;
   wq_init_attr.pd = cb->pd;
   wq_init_attr.cq = cb->recv_cq;
