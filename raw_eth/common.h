@@ -132,14 +132,6 @@ void init_recv_qp(ctrl_blk_t* cb) {
   int ret = ibv_exp_modify_cq(cb->recv_cq, &cq_attr, IBV_EXP_CQ_CAP_FLAGS);
   assert(ret == 0);
 
-  uint8_t toeplitz_key[] = {0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
-                            0x41, 0x67, 0x25, 0x3d, 0x43, 0xa3, 0x8f, 0xb0,
-                            0xd0, 0xca, 0x2b, 0xcb, 0xae, 0x7b, 0x30, 0xb4,
-                            0x77, 0xcb, 0x2d, 0xa3, 0x80, 0x30, 0xf2, 0x0c,
-                            0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa};
-  const int TOEPLITZ_RX_HASH_KEY_LEN =
-      sizeof(toeplitz_key) / sizeof(toeplitz_key[0]);
-
   struct ibv_exp_wq_init_attr wq_init_attr;
   memset(&wq_init_attr, 0, sizeof(wq_init_attr));
 
@@ -161,10 +153,10 @@ void init_recv_qp(ctrl_blk_t* cb) {
   memset(&wq_attr, 0, sizeof(wq_attr));
   wq_attr.attr_mask = IBV_EXP_WQ_ATTR_STATE;
   wq_attr.wq_state = IBV_EXP_WQS_RDY;
-
   ret = ibv_exp_modify_wq(cb->wq, &wq_attr);
   assert(ret == 0);
 
+  // Get the RQ burst function
   enum ibv_exp_query_intf_status intf_status = IBV_EXP_INTF_STAT_OK;
   struct ibv_exp_query_intf_params query_intf_params;
   memset(&query_intf_params, 0, sizeof(query_intf_params));
@@ -187,6 +179,14 @@ void init_recv_qp(ctrl_blk_t* cb) {
   assert(cb->ind_tbl != nullptr);
 
   // Create rx_hash_conf and indirection table for the QP
+  uint8_t toeplitz_key[] = {0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
+                            0x41, 0x67, 0x25, 0x3d, 0x43, 0xa3, 0x8f, 0xb0,
+                            0xd0, 0xca, 0x2b, 0xcb, 0xae, 0x7b, 0x30, 0xb4,
+                            0x77, 0xcb, 0x2d, 0xa3, 0x80, 0x30, 0xf2, 0x0c,
+                            0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa};
+  const int TOEPLITZ_RX_HASH_KEY_LEN =
+      sizeof(toeplitz_key) / sizeof(toeplitz_key[0]);
+
   struct ibv_exp_rx_hash_conf rx_hash_conf;
   memset(&rx_hash_conf, 0, sizeof(rx_hash_conf));
   rx_hash_conf.rx_hash_function = IBV_EXP_RX_HASH_FUNC_TOEPLITZ;
