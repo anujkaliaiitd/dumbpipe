@@ -71,24 +71,9 @@ struct data_hdr_t {
 };
 static_assert(sizeof(data_hdr_t) == kDataSize, "");
 
-ctrl_blk_t* init_ctx(size_t device_index) {
-  auto* cb = new ctrl_blk_t();
-  memset(cb, 0, sizeof(ctrl_blk_t));
+void init_send_qp(ctrl_blk_t* cb) {
+  assert(cb->context != nullptr && cb->pd != nullptr);
 
-  struct ibv_device** dev_list = ibv_get_device_list(nullptr);
-  assert(dev_list != nullptr);
-
-  cb->ib_dev = dev_list[device_index];
-  assert(cb->ib_dev != nullptr);
-  printf("Using device %s\n", cb->ib_dev->name);
-
-  cb->context = ibv_open_device(cb->ib_dev);
-  assert(cb->context != nullptr);
-
-  cb->pd = ibv_alloc_pd(cb->context);
-  assert(cb->pd != nullptr);
-
-  // SEND QP
   struct ibv_exp_cq_init_attr cq_init_attr;
   memset(&cq_init_attr, 0, sizeof(cq_init_attr));
   cb->send_cq = ibv_exp_create_cq(cb->context, kSQDepth, nullptr, nullptr, 0,
@@ -128,8 +113,13 @@ ctrl_blk_t* init_ctx(size_t device_index) {
   qp_attr.qp_state = IBV_QPS_RTS;
   ret = ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE);
   assert(ret >= 0);
+}
 
-  // RECV QP
+void init_recv_qp(ctrl_blk_t* cb) {
+  assert(cb->context != nullptr && cb->pd != nullptr);
+
+  struct ibv_exp_cq_init_attr cq_init_attr;
+  memset(&cq_init_attr, 0, sizeof(cq_init_attr));
   cb->recv_cq = ibv_exp_create_cq(cb->context, kRQDepth, nullptr, nullptr, 0,
                                   &cq_init_attr);
   assert(cb->recv_cq != nullptr);
@@ -139,7 +129,7 @@ ctrl_blk_t* init_ctx(size_t device_index) {
   memset(&cq_attr, 0, sizeof(cq_attr));
   cq_attr.comp_mask = IBV_EXP_CQ_ATTR_CQ_CAP_FLAGS;
   cq_attr.cq_cap_flags = IBV_EXP_CQ_IGNORE_OVERRUN;
-  ret = ibv_exp_modify_cq(cb->recv_cq, &cq_attr, IBV_EXP_CQ_CAP_FLAGS);
+  int ret = ibv_exp_modify_cq(cb->recv_cq, &cq_attr, IBV_EXP_CQ_CAP_FLAGS);
   assert(ret == 0);
 
   uint8_t toeplitz_key[] = {0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
@@ -205,6 +195,7 @@ ctrl_blk_t* init_ctx(size_t device_index) {
   rx_hash_conf.rx_hash_fields_mask = IBV_EXP_RX_HASH_DST_PORT_UDP;
   rx_hash_conf.rwq_ind_tbl = cb->ind_tbl;
 
+  struct ibv_exp_qp_init_attr qp_init_attr;
   memset(&qp_init_attr, 0, sizeof(qp_init_attr));
   qp_init_attr.comp_mask = IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS |
                            IBV_EXP_QP_INIT_ATTR_PD |
@@ -216,6 +207,27 @@ ctrl_blk_t* init_ctx(size_t device_index) {
   // Create the QP
   cb->recv_qp = ibv_exp_create_qp(cb->context, &qp_init_attr);
   assert(cb->recv_qp != nullptr);
+}
+
+ctrl_blk_t* init_ctx(size_t device_index) {
+  auto* cb = new ctrl_blk_t();
+  memset(cb, 0, sizeof(ctrl_blk_t));
+
+  struct ibv_device** dev_list = ibv_get_device_list(nullptr);
+  assert(dev_list != nullptr);
+
+  cb->ib_dev = dev_list[device_index];
+  assert(cb->ib_dev != nullptr);
+  printf("Using device %s\n", cb->ib_dev->name);
+
+  cb->context = ibv_open_device(cb->ib_dev);
+  assert(cb->context != nullptr);
+
+  cb->pd = ibv_alloc_pd(cb->context);
+  assert(cb->pd != nullptr);
+
+  init_send_qp(cb);
+  init_recv_qp(cb);
 
   return cb;
 }
