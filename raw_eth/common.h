@@ -9,9 +9,10 @@
 #include <thread>
 
 #include "inet_hdrs.h"
+#include "mlx5_defs.h"
 
-static constexpr size_t kReceiverThreads = 2;
-static constexpr bool kVerbose = false;
+static constexpr size_t kReceiverThreads = 1;
+static constexpr bool kVerbose = true;
 
 static constexpr size_t kDeviceIndex = 2;
 static constexpr size_t kPortIndex = 2;  // mlx5_0
@@ -19,7 +20,8 @@ static constexpr size_t kDataSize = 32;  // Data size, without headers
 static_assert(kDataSize % sizeof(size_t) == 0, "");
 
 static constexpr size_t kSQDepth = 128;
-static constexpr size_t kRQDepth = 2;  // Multi-packet RQ
+static constexpr size_t kRQDepth = 2;  // Multi-packet RQ depth
+static_assert(kRQDepth <= 4, "");      // Double check - RQ must be small
 
 static constexpr size_t kLogNumStrides = 9;
 static constexpr size_t kLogStrideBytes = 10;
@@ -118,10 +120,11 @@ void init_send_qp(ctrl_blk_t* cb) {
 void init_recv_qp(ctrl_blk_t* cb) {
   assert(cb->context != nullptr && cb->pd != nullptr);
 
+  // Init CQ. Its size MUST be one so that we get two CQEs in mlx5.
   struct ibv_exp_cq_init_attr cq_init_attr;
   memset(&cq_init_attr, 0, sizeof(cq_init_attr));
-  cb->recv_cq = ibv_exp_create_cq(cb->context, kRQDepth, nullptr, nullptr, 0,
-                                  &cq_init_attr);
+  cb->recv_cq =
+      ibv_exp_create_cq(cb->context, 1, nullptr, nullptr, 0, &cq_init_attr);
   assert(cb->recv_cq != nullptr);
 
   // Modify the RECV CQ to ignore overrun

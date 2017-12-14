@@ -1,4 +1,5 @@
 #include "common.h"
+#include "mlx5_defs.h"
 
 // Install a UDP destination port--based flow rule
 void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
@@ -70,15 +71,23 @@ void thread_func(size_t thread_id) {
   size_t cur_buf = 0, nb_rx = 0;
   struct timespec start, end;
 
+  // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
+  auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
+  auto* cqe_0 = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
+
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
     uint8_t* buf = &ring[cur_buf * kRingMbufSize];
     auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
     if (data_hdr->seq_num > 0) {
+      usleep(200);  // Let the CQE be DMA-ed
       if (kVerbose) {
-        printf("Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu\n",
-               thread_id, cur_buf, data_hdr->seq_num, nb_rx);
-        usleep(20000);
+        printf(
+            "Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu. "
+            " ctr_0 = %u, ctr_1 = %u\n",
+            thread_id, cur_buf, data_hdr->seq_num, nb_rx,
+            ntohs(cqe_0[0].wqe_counter), ntohs(cqe_0[1].wqe_counter));
+        // usleep(200);
       }
 
       assert(data_hdr->receiver_thread == thread_id);
