@@ -60,7 +60,6 @@ int main() {
 
     struct ibv_send_wr* bad_wr;
     int ret = ibv_post_send(cb->qp, &wr, &bad_wr);
-    usleep(200);
     if (ret < 0) {
       fprintf(stderr, "Failed in post send\n");
       exit(1);

@@ -71,26 +71,42 @@ void thread_func(size_t thread_id) {
   cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
   printf("Thread %zu: Listening\n", thread_id);
-  size_t last_buffer = 0;
+  size_t cur_buf = 0, nb_rx = 0;
+  struct timespec start, end;
+
+  clock_gettime(CLOCK_REALTIME, &start);
+
   while (true) {
-    for (size_t i = last_buffer; i < kRQDepth; i++) {
-      uint8_t* buf = &ring[i * kStrideBytes];
-      auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
-      if (data_hdr->seq_num > 0) {
-        printf("Thread %zu: Buf %zu filled. Seq = %zu, receiver thread = %zu\n",
-               thread_id, i, data_hdr->seq_num, data_hdr->receiver_thread);
-        last_buffer = i;
-        assert(data_hdr->receiver_thread == thread_id);
+    uint8_t* buf = &ring[cur_buf * kStrideBytes];
+    auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
+    if (data_hdr->seq_num > 0) {
+      if (kVerbose) {
+        printf("Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu\n",
+               thread_id, cur_buf, data_hdr->seq_num, nb_rx);
+        usleep(20000);
       }
 
-      if (last_buffer == kRQDepth - 1) {
-        last_buffer = 0;
-        memset(ring, 0, ring_size);
-        printf("Posting RECV again\n");
-        cb->wq_family->recv_burst(cb->wq, &sge, 1);
-      }
+      assert(data_hdr->receiver_thread == thread_id);
+      data_hdr->seq_num = 0;
+      cur_buf++;
+      nb_rx++;
     }
-    usleep(200);
+
+    if (nb_rx == 100000) {
+      clock_gettime(CLOCK_REALTIME, &end);
+      double sec = (end.tv_sec - start.tv_sec) +
+                   (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+      printf("Thread %zu: RX tput = %.2f/s\n", thread_id, nb_rx / sec);
+
+      clock_gettime(CLOCK_REALTIME, &start);
+      nb_rx = 0;
+    }
+
+    if (cur_buf == kNumStrides) {
+      cur_buf = 0;
+      if (kVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
+      cb->wq_family->recv_burst(cb->wq, &sge, 1);
+    }
   }
 }
 

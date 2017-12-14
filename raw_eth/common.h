@@ -10,6 +10,9 @@
 #include <sstream>
 #include <thread>
 
+static constexpr size_t kReceiverThreads = 2;
+static constexpr bool kVerbose = false;
+
 static constexpr size_t kDeviceIndex = 2;
 static constexpr size_t kPortIndex = 2;       // mlx5_0
 static constexpr size_t kDataSize = 32;       // Data size, without headers
@@ -26,8 +29,6 @@ static constexpr size_t kStrideBytes = (1ull << kLogStrideBytes);
 
 static constexpr uint16_t kIPEtherType = 0x800;
 static constexpr uint16_t kIPHdrProtocol = 0x11;
-
-static constexpr size_t kReceiverThreads = 2;
 
 uint8_t kDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
 char kDstIP[] = "192.168.1.250";
@@ -170,14 +171,21 @@ ctrl_blk_t* init_ctx_common(size_t device_index) {
 
   struct ibv_exp_cq_init_attr cq_init_attr;
   memset(&cq_init_attr, 0, sizeof(cq_init_attr));
-
   cb->send_cq = ibv_exp_create_cq(cb->context, kSQDepth, nullptr, nullptr, 0,
                                   &cq_init_attr);
   assert(cb->send_cq != nullptr);
 
-  cb->recv_cq = ibv_exp_create_cq(cb->context, kRQDepth, nullptr, nullptr, 0,
-                                  &cq_init_attr);
+  cb->recv_cq =
+      ibv_exp_create_cq(cb->context, 1, nullptr, nullptr, 0, &cq_init_attr);
   assert(cb->recv_cq != nullptr);
+
+  // Modify the RECV CQ to ignore overrun
+  struct ibv_exp_cq_attr cq_attr;
+  memset(&cq_attr, 0, sizeof(cq_attr));
+  cq_attr.comp_mask = IBV_EXP_CQ_ATTR_CQ_CAP_FLAGS;
+  cq_attr.cq_cap_flags = IBV_EXP_CQ_IGNORE_OVERRUN;
+  int ret = ibv_exp_modify_cq(cb->recv_cq, &cq_attr, IBV_EXP_CQ_CAP_FLAGS);
+  assert(ret == 0);
 
   return cb;
 }
