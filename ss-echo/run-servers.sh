@@ -11,6 +11,7 @@ sudo killall memcached
 memcached -l 0.0.0.0 1>/dev/null 2>/dev/null &
 sleep 1
 
+executable="../build/raw-eth"
 blue "Starting $num_server_threads server threads"
 
 flags="
@@ -23,10 +24,10 @@ flags="
 
 # Check for non-gdb mode
 if [ "$#" -eq 0 ]; then
-  sudo -E numactl --cpunodebind=0 --membind=0 ../build/ss-echo $flags
+  sudo -E numactl --cpunodebind=0 --membind=0 $executable $flags
 fi
 
 # Check for gdb mode
 if [ "$#" -eq 1 ]; then
-  sudo -E gdb -ex run --args ../build/ss-echo $flags
+  sudo -E gdb -ex run --args $executable $flags
 fi
