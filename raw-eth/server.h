@@ -67,31 +67,30 @@ void run_server(thread_params_t params) {
   cb->wq_family->recv_burst(cb->wq, &sge, 1);
 
   printf("Thread %zu: Listening\n", thread_id);
-  size_t cur_buf = 0, nb_rx = 0;
+  size_t ring_head = 0, nb_rx = 0;
   struct timespec start, end;
 
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
-  auto* cqe_0 = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
+  auto* cqe_arr = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
 
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
-    uint8_t* buf = &ring[cur_buf * kAppRingMbufSize];
+    uint8_t* buf = &ring[ring_head * kAppRingMbufSize];
     auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
     if (data_hdr->seq_num > 0) {
-      usleep(200);  // Let the CQE be DMA-ed
       if (kAppVerbose) {
         printf(
             "Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu. "
             " ctr_0 = %u, ctr_1 = %u\n",
-            thread_id, cur_buf, data_hdr->seq_num, nb_rx,
-            ntohs(cqe_0[0].wqe_counter), ntohs(cqe_0[1].wqe_counter));
-        // usleep(200);
+            thread_id, ring_head, data_hdr->seq_num, nb_rx,
+            ntohs(cqe_arr[0].wqe_counter), ntohs(cqe_arr[1].wqe_counter));
+        usleep(200);
       }
 
       assert(data_hdr->server_thread == thread_id);
       data_hdr->seq_num = 0;
-      cur_buf++;
+      ring_head++;
       nb_rx++;
     }
 
@@ -105,8 +104,8 @@ void run_server(thread_params_t params) {
       nb_rx = 0;
     }
 
-    if (cur_buf == kAppNumRingEntries) {
-      cur_buf = 0;
+    if (ring_head == kAppNumRingEntries) {
+      ring_head = 0;
       if (kAppVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
       cb->wq_family->recv_burst(cb->wq, &sge, 1);
     }

@@ -24,7 +24,7 @@ DEFINE_uint64(dual_port, 0, "Use two ports?");
 DEFINE_uint64(size, 0, "RDMA size");
 DEFINE_uint64(postlist, std::numeric_limits<size_t>::max(), "Postlist size");
 
-static constexpr bool kAppVerbose = true;
+static constexpr bool kAppVerbose = false;
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 

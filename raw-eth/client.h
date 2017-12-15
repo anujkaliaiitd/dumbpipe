@@ -60,7 +60,6 @@ void run_client(thread_params_t params) {
 
     struct ibv_send_wr* bad_wr;
     int ret = ibv_post_send(cb->send_qp, &wr, &bad_wr);
-    sleep(1);
     if (ret < 0) {
       fprintf(stderr, "Failed in post send\n");
       exit(1);
