@@ -4,6 +4,7 @@ source $(dirname $0)/../scripts/mlx_env.sh
 source $(dirname $0)/params.sh
 
 drop_shm
+hugepages_or_exit
 
 # lsync messes up permissions
 executable="../build/raw-eth"
