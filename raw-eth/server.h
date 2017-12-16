@@ -60,11 +60,11 @@ void snapshot_cqe(volatile mlx5_cqe64* cqe, cqe_snapshot_t& cqe_snapshot) {
 }
 
 size_t get_num_comps(const cqe_snapshot_t& prev, const cqe_snapshot_t& cur) {
-  size_t prev_idx = prev.get_ring_idx();
-  size_t cur_idx = cur.get_ring_idx();
-  assert(prev_idx < kAppNumRingEntries && cur_idx < kAppNumRingEntries);
+  size_t prev_idx = prev.get_cqe_snapshot_cycle_idx();
+  size_t cur_idx = cur.get_cqe_snapshot_cycle_idx();
+  assert(prev_idx < kCQESnapshotCycle && cur_idx < kCQESnapshotCycle);
 
-  return ((cur_idx + kAppNumRingEntries) - prev_idx) % kAppNumRingEntries;
+  return ((cur_idx + kCQESnapshotCycle) - prev_idx) % kCQESnapshotCycle;
 }
 
 void run_server(thread_params_t params) {
@@ -86,12 +86,13 @@ void run_server(thread_params_t params) {
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
   auto* cqe_0 = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
-  cqe_0->wqe_id = htons(kAppRQDepth - 1);             // Network-endian
-  cqe_0->wqe_counter = htons(kAppStridesPerWQE - 1);  // Network-endian
 
+  // Initialize the CQE to the last CQE in the snapshot cycle
+  cqe_0->wqe_id = htons(std::numeric_limits<uint16_t>::max());
+  cqe_0->wqe_counter = htons(kAppStridesPerWQE - 1);
   cqe_snapshot_t prev_snapshot;
   snapshot_cqe(cqe_0, prev_snapshot);
-  assert(prev_snapshot.get_ring_idx() == kAppNumRingEntries - 1);
+  assert(prev_snapshot.get_cqe_snapshot_cycle_idx() == kCQESnapshotCycle - 1);
 
   // The multi-packet RECVs. This must be done after we've initialized the CQE.
   struct ibv_sge sge[kAppRQDepth];

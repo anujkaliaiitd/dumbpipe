@@ -24,7 +24,7 @@ DEFINE_uint64(dual_port, 0, "Use two ports?");
 DEFINE_uint64(size, 0, "RDMA size");
 DEFINE_uint64(postlist, std::numeric_limits<size_t>::max(), "Postlist size");
 
-static constexpr bool kAppVerbose = true;
+static constexpr bool kAppVerbose = false;
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 
@@ -43,6 +43,9 @@ static constexpr size_t kAppRingMbufSize = (1ull << kAppLogStrideBytes);
 
 /// Number of strides in one multi-packet RECV WQE
 static constexpr size_t kAppStridesPerWQE = (1ull << kAppLogNumStrides);
+
+/// Packets after which the CQE snapshot cycles
+static constexpr size_t kCQESnapshotCycle = 65536 * kAppStridesPerWQE;
 
 /// Total number of entries in the RX ring
 static constexpr size_t kAppNumRingEntries = (kAppStridesPerWQE * kAppRQDepth);
@@ -99,7 +102,8 @@ struct cqe_snapshot_t {
   uint16_t wqe_id;
   uint16_t wqe_counter;
 
-  size_t get_ring_idx() const {
+  /// Return this packet's index in the CQE snapshot cycle
+  size_t get_cqe_snapshot_cycle_idx() const {
     return wqe_id * kAppStridesPerWQE + wqe_counter;
   }
 
