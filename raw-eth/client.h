@@ -20,6 +20,7 @@ void run_client(thread_params_t params) {
   ctrl_blk_t* cb = init_ctx(kAppDeviceIndex);
   FastRand fast_rand;
   const size_t pkt_size = kTotHdrSz + FLAGS_size;
+  rt_assert(pkt_size >= 60);
 
   struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;
   struct ibv_sge sgl[kAppMaxPostlist];

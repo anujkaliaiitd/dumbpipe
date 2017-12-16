@@ -76,12 +76,13 @@ void run_server(thread_params_t params) {
   install_flow_rule(cb->recv_qp, dst_port);
 
   // Register RX ring memory
-  uint8_t* ring = new uint8_t[kAppRingSize];
+  uint8_t* ring = reinterpret_cast<uint8_t*>(memalign(4096, kAppRingSize));
+  rt_assert(ring != nullptr);
   memset(ring, 0, kAppRingSize);
 
   struct ibv_mr* mr =
       ibv_reg_mr(cb->pd, ring, kAppRingSize, IBV_ACCESS_LOCAL_WRITE);
-  assert(mr != nullptr);
+  rt_assert(mr != nullptr);
 
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
