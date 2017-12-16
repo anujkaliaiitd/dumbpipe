@@ -17,7 +17,6 @@ void format_packet(uint8_t* buf) {
 }
 
 void run_client(thread_params_t params) {
-  ((void)params);
   ctrl_blk_t* cb = init_ctx(kAppDeviceIndex);
   FastRand fast_rand;
 
@@ -66,7 +65,9 @@ void run_client(thread_params_t params) {
     }
     // usleep(200);
 
-    if (nb_tx++ % 1000000 == 0) printf("Sent %zu packets\n", nb_tx);
+    if (nb_tx++ % MB(1) == 0) {
+      printf("Thread %zu: Sent %zu packets\n", params.id, nb_tx);
+    }
 
     struct ibv_wc wc;
     ret = ibv_poll_cq(cb->send_cq, 1, &wc);
