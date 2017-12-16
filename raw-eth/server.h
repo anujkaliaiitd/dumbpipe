@@ -72,26 +72,52 @@ void run_server(thread_params_t params) {
 
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
-  auto* cqe_arr = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
+  auto* cqe_0 = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
+  cqe_0->wqe_counter = htons(kAppNumRingEntries - 1);
+  size_t prev_counter = ntohs(cqe_0->wqe_counter);
+  assert(prev_counter == kAppNumRingEntries - 1);
 
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
-    uint8_t* buf = &ring[ring_head * kAppRingMbufSize];
-    auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
-    if (data_hdr->seq_num > 0) {
+    const size_t cur_counter = ntohs(cqe_0->wqe_counter);
+    const size_t num_comps =
+        ((cur_counter + kAppNumRingEntries) - prev_counter) %
+        kAppNumRingEntries;
+
+    if (num_comps == 0) continue;
+    prev_counter = cur_counter;
+
+    const size_t orig_ring_head = ring_head;
+    for (size_t i = 0; i < num_comps; i++) {
+      uint8_t* buf = &ring[ring_head * kAppRingMbufSize];
+      auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
+      if (unlikely(data_hdr->seq_num == 0)) {
+        printf(
+            "Thread %zu: prev_counter = %zu, cur_counter = %zu, "
+            "orig_ring_head = %zu, but buf %zu is empty.\n",
+            thread_id, prev_counter, cur_counter, orig_ring_head, ring_head);
+        throw std::runtime_error("CQE logic error");
+      }
+
       if (kAppVerbose) {
         printf(
             "Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu. "
-            " ctr_0 = %u, ctr_1 = %u\n",
+            " ctr_0 = %u\n",
             thread_id, ring_head, data_hdr->seq_num, nb_rx,
-            ntohs(cqe_arr[0].wqe_counter), ntohs(cqe_arr[1].wqe_counter));
-        usleep(200);
+            ntohs(cqe_0->wqe_counter));
+        // usleep(200);
       }
 
       assert(data_hdr->server_thread == thread_id);
       data_hdr->seq_num = 0;
-      ring_head++;
+
       nb_rx++;
+      ring_head++;
+      if (ring_head == kAppNumRingEntries) {
+        ring_head = 0;
+        if (kAppVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
+        cb->wq_family->recv_burst(cb->wq, &sge, 1);
+      }
     }
 
     if (nb_rx == 1000000) {
@@ -102,12 +128,6 @@ void run_server(thread_params_t params) {
 
       clock_gettime(CLOCK_REALTIME, &start);
       nb_rx = 0;
-    }
-
-    if (ring_head == kAppNumRingEntries) {
-      ring_head = 0;
-      if (kAppVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
-      cb->wq_family->recv_burst(cb->wq, &sge, 1);
     }
   }
 }

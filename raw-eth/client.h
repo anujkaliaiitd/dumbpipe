@@ -64,6 +64,7 @@ void run_client(thread_params_t params) {
       fprintf(stderr, "Failed in post send\n");
       exit(1);
     }
+    // usleep(200);
 
     if (nb_tx++ % 1000000 == 0) printf("Sent %zu packets\n", nb_tx);
 
