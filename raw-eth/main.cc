@@ -9,6 +9,7 @@ int main(int argc, char* argv[]) {
   double* tput = nullptr;  // Leaked
 
   // Basic flag checks
+  rt_assert(FLAGS_dual_port <= 1, "Invalid dual_port");
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
             "Invalid postlist");
