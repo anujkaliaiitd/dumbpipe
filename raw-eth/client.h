@@ -29,7 +29,7 @@ void run_client(thread_params_t params) {
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
 
-  uint8_t *pkt_arr[kAppMaxPostlist];  // Leaked
+  uint8_t* pkt_arr[kAppMaxPostlist];  // Leaked
   for (size_t i = 0; i < FLAGS_postlist; i++) {
     pkt_arr[i] = new uint8_t[pkt_size];
     memset(pkt_arr[i], 0, pkt_size);
@@ -68,9 +68,8 @@ void run_client(thread_params_t params) {
       }
 
       // Direct the packet to one of the receiver threads
-      auto* udp_hdr =
-          reinterpret_cast<udp_hdr_t*>(pkt_arr[w_i] + sizeof(eth_hdr_t) +
-                                       sizeof(ipv4_hdr_t));
+      auto* udp_hdr = reinterpret_cast<udp_hdr_t*>(
+          pkt_arr[w_i] + sizeof(eth_hdr_t) + sizeof(ipv4_hdr_t));
       size_t srv_thread_idx = fast_rand.next_u32() % FLAGS_num_server_threads;
       udp_hdr->dst_port = htons(kBaseDstPort + srv_thread_idx);
 
@@ -80,15 +79,14 @@ void run_client(thread_params_t params) {
       data_hdr->seq_num = seq_num[srv_thread_idx]++;
 
       sgl[w_i].addr = reinterpret_cast<uint64_t>(pkt_arr[w_i]);
-      sgl[w_i].length = FLAGS_size;
+      sgl[w_i].length = pkt_size;
+      sgl[w_i].lkey = 0;
 
       rolling_iter++;
       nb_tx++;
     }
 
     int ret = ibv_post_send(cb->send_qp, &wr[0], &bad_send_wr);
-    if (ret != 0) printf("ret = %d\n", ret);
-    _unused(ret);
-    assert(ret == 0);
+    rt_assert(ret == 0);
   }
 }

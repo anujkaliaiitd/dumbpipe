@@ -151,7 +151,9 @@ void run_server(thread_params_t params) {
         if (kAppVerbose) {
           printf("Thread %zu: Posting MPWQE %zu.\n", thread_id, sge_idx);
         }
-        cb->wq_family->recv_burst(cb->wq, &sge[sge_idx], 1);
+
+        int ret = cb->wq_family->recv_burst(cb->wq, &sge[sge_idx], 1);
+        rt_assert(ret == 0);
         sge_idx = (sge_idx + 1) % kAppRQDepth;
       }
     }
