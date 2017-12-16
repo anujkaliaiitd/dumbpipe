@@ -104,7 +104,7 @@ void run_server(thread_params_t params) {
   }
 
   printf("Thread %zu: Listening\n", thread_id);
-  size_t ring_head = 0, nb_rx = 0, nb_rx_rolling = 0, sge_idx;
+  size_t ring_head = 0, nb_rx = 0, nb_rx_rolling = 0, sge_idx = 0;
   struct timespec start, end;
 
   clock_gettime(CLOCK_REALTIME, &start);
