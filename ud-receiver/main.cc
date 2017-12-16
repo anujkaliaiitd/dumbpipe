@@ -9,7 +9,7 @@ static constexpr size_t kAppNumQPs = 1;  // UD QPs used by server for RECVs
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppMaxSize = 60;  // Max transfer size
 static constexpr size_t kAppUnsigBatch = 64;
-static constexpr bool kIgnoreOverrun = true;  // Ignore RQ/CQ overruns
+static constexpr bool kIgnoreOverrun = false;  // Ignore RQ/CQ overruns
 
 // pkt_arr reuse at clients relies on inlining
 static_assert(kAppMaxSize <= kHrdMaxInline, "");
@@ -18,17 +18,20 @@ static_assert(is_power_of_two(kAppUnsigBatch), "");
 struct thread_params_t {
   size_t id;
   double* tput;
+
+  thread_params_t(size_t id, double* tput) : id(id), tput(tput) {}
 };
 
 DEFINE_uint64(machine_id, std::numeric_limits<size_t>::max(), "Machine ID");
-DEFINE_uint64(num_threads, 0, "Number of threads");
+DEFINE_uint64(num_client_threads, 0, "Number of threads per client machine");
+DEFINE_uint64(num_server_threads, 0, "Number of threads at server machine");
 DEFINE_uint64(is_client, 0, "Is this process a client?");
 DEFINE_uint64(dual_port, 0, "Use two ports?");
 DEFINE_uint64(size, 0, "RDMA size");
 DEFINE_uint64(postlist, std::numeric_limits<size_t>::max(), "Postlist size");
 
-void run_server(thread_params_t* params) {
-  size_t srv_gid = params->id;  // Global ID of this server thread
+void run_server(thread_params_t params) {
+  size_t srv_gid = params.id;  // Global ID of this server thread
   size_t ib_port_index = FLAGS_dual_port == 0 ? 0 : srv_gid % 2;
 
   hrd_dgram_config_t dgram_config;
@@ -68,13 +71,16 @@ void run_server(thread_params_t* params) {
       clock_gettime(CLOCK_REALTIME, &end);
       double sec = (end.tv_sec - start.tv_sec) +
                    (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-      printf("main: Server %zu: %.2f IOPS. \n", srv_gid, rolling_iter / sec);
+      printf("main: Server %zu: %.2f MOPS. \n", srv_gid,
+             rolling_iter / (sec * 1000000));
 
-      params->tput[srv_gid] = rolling_iter / sec;
+      params.tput[srv_gid] = rolling_iter / (sec * 1000000);
       if (srv_gid == 0) {
         double tot = 0;
-        for (size_t i = 0; i < FLAGS_num_threads; i++) tot += params->tput[i];
-        hrd_red_printf("main: Total tput %.2f IOPS.\n", tot);
+        for (size_t i = 0; i < FLAGS_num_server_threads; i++) {
+          tot += params.tput[i];
+        }
+        hrd_red_printf("main: Total tput %.2f MOPS.\n", tot);
       }
 
       rolling_iter = 0;
@@ -114,20 +120,16 @@ void run_server(thread_params_t* params) {
     rt_assert(ret == 0, "ibv_post_recv() error " + std::to_string(ret));
 
     rolling_iter += static_cast<size_t>(num_comps);
-    if (rolling_iter > 100000) {
-      printf("rolling_iter = %zu\n", rolling_iter);
-      rolling_iter = 0;
-    }
     mod_add_one<kAppNumQPs>(qp_i);
   }
 }
 
-void run_client(thread_params_t* params) {
+void run_client(thread_params_t params) {
   // The local HID of a control block should be <= 64 to keep the SHM key low.
   // But the number of clients over all machines can be larger.
-  size_t clt_gid = params->id;  // Global ID of this client thread
-  size_t clt_local_hid = clt_gid % FLAGS_num_threads;
-  size_t srv_gid = clt_gid % FLAGS_num_threads;
+  size_t clt_gid = params.id;  // Global ID of this client thread
+  size_t clt_local_hid = clt_gid % FLAGS_num_client_threads;
+  size_t srv_gid = clt_gid % FLAGS_num_server_threads;
   size_t ib_port_index = FLAGS_dual_port == 0 ? 0 : srv_gid % 2;
 
   hrd_dgram_config_t dgram_config;
@@ -223,7 +225,6 @@ int main(int argc, char* argv[]) {
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   double* tput = nullptr;  // Leaked
 
-  rt_assert(FLAGS_num_threads >= 1, "Invalid num_threads");
   rt_assert(FLAGS_dual_port <= 1, "Invalid dual_port");
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
@@ -232,6 +233,9 @@ int main(int argc, char* argv[]) {
             "Invalid transfer size");
 
   if (FLAGS_is_client == 1) {
+    rt_assert(FLAGS_num_client_threads >= 1, "Invalid num_client_threads");
+    // Clients need to know about number of server threads
+    rt_assert(FLAGS_num_server_threads >= 1, "Invalid num_server_threads");
     rt_assert(FLAGS_machine_id != std::numeric_limits<size_t>::max(),
               "Invalid machine_id");
 
@@ -241,23 +245,27 @@ int main(int argc, char* argv[]) {
     rt_assert(FLAGS_machine_id == std::numeric_limits<size_t>::max(), "");
     rt_assert(FLAGS_postlist <= kHrdRQDepth / 2, "RECV pollbatch too large");
 
-    tput = new double[FLAGS_num_threads];
-    for (size_t i = 0; i < FLAGS_num_threads; i++) tput[i] = 0;
+    // Server does not need to know about number of client threads
+    rt_assert(FLAGS_num_client_threads == 0, "Invalid num_client_threads");
+    rt_assert(FLAGS_num_server_threads >= 1, "Invalid num_server_threads");
+
+    tput = new double[FLAGS_num_server_threads];
+    for (size_t i = 0; i < FLAGS_num_server_threads; i++) tput[i] = 0;
   }
 
-  // Launch a single server thread or multiple client threads
-  printf("main: Using %zu threads\n", FLAGS_num_threads);
-  std::vector<thread_params_t> param_arr(FLAGS_num_threads);
-  std::vector<std::thread> thread_arr(FLAGS_num_threads);
+  size_t _num_threads = (FLAGS_is_client == 1) ? FLAGS_num_client_threads
+                                               : FLAGS_num_server_threads;
 
-  for (size_t i = 0; i < FLAGS_num_threads; i++) {
-    if (FLAGS_is_client) {
-      param_arr[i].id = (FLAGS_machine_id * FLAGS_num_threads) + i;
-      thread_arr[i] = std::thread(run_client, &param_arr[i]);
+  printf("main: Using %zu threads\n", _num_threads);
+  std::vector<std::thread> thread_arr(_num_threads);
+
+  for (size_t i = 0; i < _num_threads; i++) {
+    if (FLAGS_is_client == 1) {
+      size_t id = (FLAGS_machine_id * FLAGS_num_client_threads) + i;
+      thread_arr[i] = std::thread(run_client, thread_params_t(id, nullptr));
     } else {
-      param_arr[i].id = i;
-      param_arr[i].tput = tput;
-      thread_arr[i] = std::thread(run_server, &param_arr[i]);
+      size_t id = i;
+      thread_arr[i] = std::thread(run_server, thread_params_t(id, tput));
     }
   }
 

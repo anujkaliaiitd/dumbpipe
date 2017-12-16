@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 source $(dirname $0)/../scripts/utils.sh
 source $(dirname $0)/../scripts/mlx_env.sh
-export HRD_REGISTRY_IP="specialnode.RDMA.fawn.apt.emulab.net"
+source $(dirname $0)/params.sh
 
 drop_shm
 hugepages_or_exit
 
-executable="../build/raw-eth"
+executable="../build/ud-receiver"
 blue "Starting $num_server_threads server threads"
 
 blue "Reset server QP registry"

@@ -3,8 +3,6 @@ source $(dirname $0)/../scripts/utils.sh
 source $(dirname $0)/../scripts/mlx_env.sh
 source $(dirname $0)/params.sh
 
-export HRD_REGISTRY_IP="specialnode.RDMA.fawn.apt.emulab.net"
-
 drop_shm
 hugepages_or_exit
 
