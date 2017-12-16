@@ -24,7 +24,7 @@ DEFINE_uint64(dual_port, 0, "Use two ports?");
 DEFINE_uint64(size, 0, "RDMA size");
 DEFINE_uint64(postlist, std::numeric_limits<size_t>::max(), "Postlist size");
 
-static constexpr bool kAppVerbose = false;
+static constexpr bool kAppVerbose = true;
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 
@@ -32,13 +32,22 @@ static constexpr size_t kAppDeviceIndex = 2;
 static constexpr size_t kAppPortIndex = 2;  // mlx5_0
 
 static constexpr size_t kAppSQDepth = 128;
-static constexpr size_t kAppRQDepth = 2;  // Multi-packet RQ depth
-static_assert(kAppRQDepth <= 4, "");      // Double check - RQ must be small
+static constexpr size_t kAppRQDepth = 4;  // Multi-packet RQ depth
+static_assert(is_power_of_two(kAppRQDepth), "");
 
 static constexpr size_t kAppLogNumStrides = 9;
 static constexpr size_t kAppLogStrideBytes = 10;
-static constexpr size_t kAppNumRingEntries = (1ull << kAppLogNumStrides);
+
+/// Size of one ring message buffer
 static constexpr size_t kAppRingMbufSize = (1ull << kAppLogStrideBytes);
+
+/// Number of strides in one multi-packet RECV WQE
+static constexpr size_t kAppStridesPerWQE = (1ull << kAppLogNumStrides);
+
+/// Total number of entries in the RX ring
+static constexpr size_t kAppNumRingEntries = (kAppStridesPerWQE * kAppRQDepth);
+static_assert(is_power_of_two(kAppNumRingEntries), "");
+
 static constexpr size_t kAppRingSize = (kAppNumRingEntries * kAppRingMbufSize);
 
 uint8_t kAppDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
@@ -81,6 +90,23 @@ struct data_hdr_t {
     std::ostringstream ret;
     ret << "[Server thread " << std::to_string(server_thread) << ", seq num "
         << std::to_string(seq_num) << "]";
+    return ret.str();
+  }
+};
+
+/// A consistent snapshot of CQE fields in host endian format
+struct cqe_snapshot_t {
+  uint16_t wqe_id;
+  uint16_t wqe_counter;
+
+  size_t get_ring_idx() const {
+    return wqe_id * kAppStridesPerWQE + wqe_counter;
+  }
+
+  std::string to_string() {
+    std::ostringstream ret;
+    ret << "[ID " << std::to_string(wqe_id) << ", counter "
+        << std::to_string(wqe_counter) << "]";
     return ret.str();
   }
 };

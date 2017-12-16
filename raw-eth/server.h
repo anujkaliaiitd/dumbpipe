@@ -1,3 +1,4 @@
+#include "barrier.h"
 #include "main.h"
 #include "mlx5_defs.h"
 
@@ -43,6 +44,29 @@ void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
   rt_assert(ibv_exp_create_flow(qp, flow_attr) != nullptr);
 }
 
+void snapshot_cqe(volatile mlx5_cqe64* cqe, cqe_snapshot_t& cqe_snapshot) {
+  while (true) {
+    uint16_t wqe_id_0 = cqe->wqe_id;
+    uint16_t wqe_counter_0 = cqe->wqe_counter;
+    memory_barrier();
+    uint16_t wqe_id_1 = cqe->wqe_id;
+
+    if (likely(wqe_id_0 == wqe_id_1)) {
+      cqe_snapshot.wqe_id = ntohs(wqe_id_0);
+      cqe_snapshot.wqe_counter = ntohs(wqe_counter_0);
+      return;
+    }
+  }
+}
+
+size_t get_num_comps(const cqe_snapshot_t& prev, const cqe_snapshot_t& cur) {
+  size_t prev_idx = prev.get_ring_idx();
+  size_t cur_idx = cur.get_ring_idx();
+  assert(prev_idx < kAppNumRingEntries && cur_idx < kAppNumRingEntries);
+
+  return ((cur_idx + kAppNumRingEntries) - prev_idx) % kAppNumRingEntries;
+}
+
 void run_server(thread_params_t params) {
   size_t thread_id = params.id;
   ctrl_blk_t* cb = init_ctx(kAppDeviceIndex);
@@ -59,68 +83,81 @@ void run_server(thread_params_t params) {
       ibv_reg_mr(cb->pd, ring, kAppRingSize, IBV_ACCESS_LOCAL_WRITE);
   assert(mr != nullptr);
 
-  // The multi-packet RECV
-  struct ibv_sge sge;
-  sge.addr = reinterpret_cast<uint64_t>(ring);
-  sge.lkey = mr->lkey;
-  sge.length = kAppRingSize;
-  cb->wq_family->recv_burst(cb->wq, &sge, 1);
-
-  printf("Thread %zu: Listening\n", thread_id);
-  size_t ring_head = 0, nb_rx = 0;
-  struct timespec start, end;
-
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
   auto* cqe_0 = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
-  cqe_0->wqe_counter = htons(kAppNumRingEntries - 1);
-  size_t prev_counter = ntohs(cqe_0->wqe_counter);
-  assert(prev_counter == kAppNumRingEntries - 1);
+  cqe_0->wqe_id = htons(kAppRQDepth - 1);             // Network-endian
+  cqe_0->wqe_counter = htons(kAppStridesPerWQE - 1);  // Network-endian
+
+  cqe_snapshot_t prev_snapshot;
+  snapshot_cqe(cqe_0, prev_snapshot);
+  assert(prev_snapshot.get_ring_idx() == kAppNumRingEntries - 1);
+
+  // The multi-packet RECVs. This must be done after we've initialized the CQE.
+  struct ibv_sge sge[kAppRQDepth];
+  for (size_t i = 0; i < kAppRQDepth; i++) {
+    size_t mpwqe_offset = i * (kAppRingMbufSize * kAppStridesPerWQE);
+    sge[i].addr = reinterpret_cast<uint64_t>(&ring[mpwqe_offset]);
+    sge[i].lkey = mr->lkey;
+    sge[i].length = kAppRingSize;
+    cb->wq_family->recv_burst(cb->wq, &sge[i], 1);
+  }
+
+  printf("Thread %zu: Listening\n", thread_id);
+  size_t ring_head = 0, nb_rx = 0, nb_rx_rolling = 0, sge_idx;
+  struct timespec start, end;
 
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
-    const size_t cur_counter = ntohs(cqe_0->wqe_counter);
-    const size_t num_comps =
-        ((cur_counter + kAppNumRingEntries) - prev_counter) %
-        kAppNumRingEntries;
+    cqe_snapshot_t cur_snapshot;
+    snapshot_cqe(cqe_0, cur_snapshot);
 
+    const size_t num_comps = get_num_comps(prev_snapshot, cur_snapshot);
     if (num_comps == 0) continue;
-    prev_counter = cur_counter;
 
     const size_t orig_ring_head = ring_head;
     for (size_t i = 0; i < num_comps; i++) {
       uint8_t* buf = &ring[ring_head * kAppRingMbufSize];
       auto* data_hdr = reinterpret_cast<data_hdr_t*>(buf + kTotHdrSz);
+
       if (unlikely(data_hdr->seq_num == 0)) {
         printf(
-            "Thread %zu: prev_counter = %zu, cur_counter = %zu, "
+            "Thread %zu: prev snapshot = %s, cur = %s, num_comps = %zu "
             "orig_ring_head = %zu, but buf %zu is empty.\n",
-            thread_id, prev_counter, cur_counter, orig_ring_head, ring_head);
+            thread_id, prev_snapshot.to_string().c_str(),
+            cur_snapshot.to_string().c_str(), num_comps, orig_ring_head,
+            ring_head);
         throw std::runtime_error("CQE logic error");
       }
 
       if (kAppVerbose) {
         printf(
             "Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu. "
-            " ctr_0 = %u\n",
+            "cur_snapshot = %s\n",
             thread_id, ring_head, data_hdr->seq_num, nb_rx,
-            ntohs(cqe_0->wqe_counter));
+            cur_snapshot.to_string().c_str());
         // usleep(200);
       }
 
       assert(data_hdr->server_thread == thread_id);
       data_hdr->seq_num = 0;
 
-      nb_rx++;
-      ring_head++;
-      if (ring_head == kAppNumRingEntries) {
-        ring_head = 0;
-        if (kAppVerbose) printf("Thread %zu: Posting MP RECV.\n", thread_id);
-        cb->wq_family->recv_burst(cb->wq, &sge, 1);
+      ring_head = (ring_head + 1) % kAppNumRingEntries;
+
+      nb_rx_rolling++;
+      if (nb_rx_rolling == kAppStridesPerWQE) {
+        nb_rx_rolling = 0;
+        if (kAppVerbose) {
+          printf("Thread %zu: Posting MPWQE %zu.\n", thread_id, sge_idx);
+        }
+        cb->wq_family->recv_burst(cb->wq, &sge[sge_idx], 1);
+        sge_idx = (sge_idx + 1) % kAppRQDepth;
       }
     }
 
-    if (nb_rx == 1000000) {
+    prev_snapshot = cur_snapshot;
+    nb_rx += num_comps;
+    if (nb_rx >= 1000000) {
       clock_gettime(CLOCK_REALTIME, &end);
       double sec = (end.tv_sec - start.tv_sec) +
                    (end.tv_nsec - start.tv_nsec) / 1000000000.0;
