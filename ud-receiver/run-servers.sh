@@ -4,30 +4,32 @@ source $(dirname $0)/../scripts/mlx_env.sh
 export HRD_REGISTRY_IP="specialnode.RDMA.fawn.apt.emulab.net"
 
 drop_shm
+hugepages_or_exit
 
-num_threads=1
+executable="../build/raw-eth"
+blue "Starting $num_server_threads server threads"
 
 blue "Reset server QP registry"
 sudo killall memcached
 memcached -l 0.0.0.0 1>/dev/null 2>/dev/null &
 sleep 1
 
-blue "Starting $num_threads server threads"
+blue "Starting $num_server_threads server threads"
 
 flags="
-	--num_threads $num_threads \
-	--dual_port 0 \
+	--num_server_threads $num_server_threads \
+	--dual_port $dual_port \
 	--is_client 0 \
-	--size 32 \
-	--postlist 16
+	--size $size \
+	--postlist $postlist
 "
 
 # Check for non-gdb mode
 if [ "$#" -eq 0 ]; then
-  sudo -E numactl --cpunodebind=0 --membind=0 ../build/ud-receiver $flags
+  sudo -E numactl --cpunodebind=0 --membind=0 $executable $flags
 fi
 
 # Check for gdb mode
 if [ "$#" -eq 1 ]; then
-  sudo -E gdb -ex run --args ../build/ud-receiver $flags
+  sudo -E gdb -ex run --args $executable $flags
 fi

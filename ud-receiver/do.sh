@@ -1,1 +1,1 @@
-make -j -C ..
+make -j -C .. ud-receiver

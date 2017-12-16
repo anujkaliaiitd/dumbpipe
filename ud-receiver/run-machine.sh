@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 source $(dirname $0)/../scripts/utils.sh
 source $(dirname $0)/../scripts/mlx_env.sh
+source $(dirname $0)/params.sh
+
 export HRD_REGISTRY_IP="specialnode.RDMA.fawn.apt.emulab.net"
 
 drop_shm
+hugepages_or_exit
 
 # lsync messes up permissions
 executable="../build/ud-receiver"
 chmod +x $executable
 
-num_threads=1			# Threads per client machine
-blue "Running $num_threads client threads"
+blue "Running $num_client_threads client threads"
 
 # Check number of arguments
 if [ "$#" -gt 2 ]; then
@@ -26,11 +28,12 @@ if [ "$#" -eq 0 ]; then
 fi
 
 flags="\
-  --num_threads $num_threads \
-	--dual_port 0 \
-  --postlist 16 \
+  --num_client_threads $num_client_threads \
+  --num_server_threads $num_server_threads \
+	--dual_port $dual_port \
+  --postlist $postlist \
 	--is_client 1 \
-  --size 32 \
+  --size $size \
 	--machine_id $1
 "
 
