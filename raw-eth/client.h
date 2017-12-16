@@ -62,9 +62,7 @@ void run_client(thread_params_t params) {
       wr[w_i].send_flags |= nb_tx % kAppUnsigBatch == 0 ? IBV_SEND_SIGNALED : 0;
       if (nb_tx % kAppUnsigBatch == kAppUnsigBatch - 1) {
         struct ibv_wc signal_wc;
-        int ret = ibv_poll_cq(cb->send_cq, 1, &signal_wc);
-        _unused(ret);
-        assert(ret >= 0);
+        hrd_poll_cq(cb->send_cq, 1, &signal_wc);
       }
 
       // Direct the packet to one of the receiver threads
