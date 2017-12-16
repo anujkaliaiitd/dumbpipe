@@ -2,5 +2,5 @@
 num_server_threads=1
 num_client_threads=4
 size=32
-postlist=16
+postlist=1
 dual_port=0

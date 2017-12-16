@@ -19,58 +19,76 @@ void format_packet(uint8_t* buf) {
 void run_client(thread_params_t params) {
   ctrl_blk_t* cb = init_ctx(kAppDeviceIndex);
   FastRand fast_rand;
-
   const size_t pkt_size = kTotHdrSz + FLAGS_size;
-  auto* packet = new uint8_t[pkt_size];
-  memset(packet, 0, pkt_size);
-  format_packet(packet);
 
-  struct ibv_sge sg_entry;
-  sg_entry.addr = reinterpret_cast<uint64_t>(packet);
-  sg_entry.length = pkt_size;
-  sg_entry.lkey = 0;
+  struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;
+  struct ibv_sge sgl[kAppMaxPostlist];
+  size_t rolling_iter = 0;  // For throughput measurement
+  size_t nb_tx = 0;
 
-  struct ibv_send_wr wr;
-  memset(&wr, 0, sizeof(wr));
-  wr.num_sge = 1;
-  wr.sg_list = &sg_entry;
-  wr.next = nullptr;
-  wr.opcode = IBV_WR_SEND;
+  struct timespec start, end;
+  clock_gettime(CLOCK_REALTIME, &start);
+
+  uint8_t *pkt_arr[kAppMaxPostlist];  // Leaked
+  for (size_t i = 0; i < FLAGS_postlist; i++) {
+    pkt_arr[i] = new uint8_t[pkt_size];
+    memset(pkt_arr[i], 0, pkt_size);
+    format_packet(pkt_arr[i]);
+  }
 
   std::vector<size_t> seq_num(FLAGS_num_server_threads);
   for (auto& s : seq_num) s = 1;
 
-  size_t nb_tx = 0;
   while (true) {
-    wr.send_flags = IBV_SEND_INLINE;
-    wr.wr_id = static_cast<size_t>(nb_tx);
-    wr.send_flags |= IBV_SEND_SIGNALED;
+    if (rolling_iter >= MB(2)) {
+      clock_gettime(CLOCK_REALTIME, &end);
+      double seconds = (end.tv_sec - start.tv_sec) +
+                       (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+      printf("Thread %zu: %.2f IOPS\n", params.id, rolling_iter / seconds);
+      rolling_iter = 0;
 
-    // Direct the packet to one of the receiver threads
-    auto* udp_hdr = reinterpret_cast<udp_hdr_t*>(packet + sizeof(eth_hdr_t) +
-                                                 sizeof(ipv4_hdr_t));
-    size_t srv_thread_idx = fast_rand.next_u32() % FLAGS_num_server_threads;
-    udp_hdr->dst_port = htons(kBaseDstPort + srv_thread_idx);
-
-    // Format user info
-    auto* data_hdr = reinterpret_cast<data_hdr_t*>(packet + kTotHdrSz);
-    data_hdr->server_thread = srv_thread_idx;
-    data_hdr->seq_num = seq_num[srv_thread_idx]++;
-
-    struct ibv_send_wr* bad_wr;
-    int ret = ibv_post_send(cb->send_qp, &wr, &bad_wr);
-    if (ret < 0) {
-      fprintf(stderr, "Failed in post send\n");
-      exit(1);
-    }
-    // usleep(200);
-
-    if (nb_tx++ % MB(1) == 0) {
-      printf("Thread %zu: Sent %zu packets\n", params.id, nb_tx);
+      clock_gettime(CLOCK_REALTIME, &start);
     }
 
-    struct ibv_wc wc;
-    ret = ibv_poll_cq(cb->send_cq, 1, &wc);
-    assert(ret >= 0);
+    // Reusing pkt_arr buffers across signals is OK because the payloads are
+    // inlined
+    for (size_t w_i = 0; w_i < FLAGS_postlist; w_i++) {
+      wr[w_i].opcode = IBV_WR_SEND;
+      wr[w_i].num_sge = 1;
+      wr[w_i].next = (w_i == FLAGS_postlist - 1) ? nullptr : &wr[w_i + 1];
+      wr[w_i].sg_list = &sgl[w_i];
+
+      wr[w_i].send_flags = IBV_SEND_INLINE;
+      wr[w_i].send_flags |= nb_tx % kAppUnsigBatch == 0 ? IBV_SEND_SIGNALED : 0;
+      if (nb_tx % kAppUnsigBatch == kAppUnsigBatch - 1) {
+        struct ibv_wc signal_wc;
+        int ret = ibv_poll_cq(cb->send_cq, 1, &signal_wc);
+        _unused(ret);
+        assert(ret >= 0);
+      }
+
+      // Direct the packet to one of the receiver threads
+      auto* udp_hdr =
+          reinterpret_cast<udp_hdr_t*>(pkt_arr[w_i] + sizeof(eth_hdr_t) +
+                                       sizeof(ipv4_hdr_t));
+      size_t srv_thread_idx = fast_rand.next_u32() % FLAGS_num_server_threads;
+      udp_hdr->dst_port = htons(kBaseDstPort + srv_thread_idx);
+
+      // Format user info
+      auto* data_hdr = reinterpret_cast<data_hdr_t*>(pkt_arr[w_i] + kTotHdrSz);
+      data_hdr->server_thread = srv_thread_idx;
+      data_hdr->seq_num = seq_num[srv_thread_idx]++;
+
+      sgl[w_i].addr = reinterpret_cast<uint64_t>(pkt_arr[w_i]);
+      sgl[w_i].length = FLAGS_size;
+
+      rolling_iter++;
+      nb_tx++;
+    }
+
+    int ret = ibv_post_send(cb->send_qp, &wr[0], &bad_send_wr);
+    if (ret != 0) printf("ret = %d\n", ret);
+    _unused(ret);
+    assert(ret == 0);
   }
 }
