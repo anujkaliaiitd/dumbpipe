@@ -76,7 +76,9 @@ void run_server(thread_params_t params) {
   install_flow_rule(cb->recv_qp, dst_port);
 
   // Register RX ring memory
-  uint8_t* ring = hrd_malloc_socket(3185, kAppRingSize, 0);
+  size_t hugealloc_sz = kAppRingSize;
+  while (hugealloc_sz % MB(2) != 0) hugealloc_sz++;
+  uint8_t* ring = hrd_malloc_socket(3185 + thread_id, hugealloc_sz, 0);
   rt_assert(ring != nullptr);
   memset(ring, 0, kAppRingSize);
 
