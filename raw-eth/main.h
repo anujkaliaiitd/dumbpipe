@@ -34,7 +34,7 @@ static constexpr size_t kAppSQDepth = 128;
 static constexpr size_t kAppRQDepth = 4;  // Multi-packet RQ depth
 static_assert(is_power_of_two(kAppRQDepth), "");
 
-static constexpr size_t kAppRecvCQDepth = 8;  // The overrunning CQ
+static constexpr size_t kAppRecvCQDepth = 8;  // Tweakme: The overrunning CQ
 static_assert(is_power_of_two(kAppRecvCQDepth), "");
 
 static constexpr size_t kAppLogNumStrides = 9;
