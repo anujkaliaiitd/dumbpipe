@@ -45,7 +45,8 @@ void run_client(thread_params_t params) {
       clock_gettime(CLOCK_REALTIME, &end);
       double seconds = (end.tv_sec - start.tv_sec) +
                        (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-      printf("Thread %zu: %.2f IOPS\n", params.id, rolling_iter / seconds);
+      printf("Thread %zu: %.2f M/s. pkt_size = %zu.\n", params.id,
+             rolling_iter / (seconds * 1000000), pkt_size);
       rolling_iter = 0;
 
       clock_gettime(CLOCK_REALTIME, &start);
