@@ -55,11 +55,11 @@ static_assert(is_power_of_two(kAppNumRingEntries), "");
 
 static constexpr size_t kAppRingSize = (kAppNumRingEntries * kAppRingMbufSize);
 
-uint8_t kAppDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
-char kAppDstIP[] = "192.168.1.250";
+uint8_t kAppSrcMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xd6};
+char kAppSrcIP[] = "192.168.1.250";
 
-uint8_t kAppSrcMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xe6};
-char kAppSrcIP[] = "192.168.1.251";
+uint8_t kAppDstMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xe6};
+char kAppDstIP[] = "192.168.1.251";
 
 // Server thread i uses UDP port (kBaseDstPort + i)
 static constexpr uint16_t kBaseDstPort = 3185;

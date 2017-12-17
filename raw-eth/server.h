@@ -183,7 +183,8 @@ void run_server(thread_params_t params) {
       clock_gettime(CLOCK_REALTIME, &end);
       double sec = (end.tv_sec - start.tv_sec) +
                    (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-      printf("Thread %zu: RX tput = %.2f/s\n", thread_id, nb_rx / sec);
+      printf("Thread %zu: RX tput = %.2f M/s\n", thread_id,
+             nb_rx / (1000000 * sec));
 
       clock_gettime(CLOCK_REALTIME, &start);
       nb_rx = 0;
