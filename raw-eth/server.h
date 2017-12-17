@@ -59,12 +59,12 @@ void snapshot_cqe(volatile mlx5_cqe64* cqe, cqe_snapshot_t& cqe_snapshot) {
   }
 }
 
-size_t get_num_comps(const cqe_snapshot_t& prev, const cqe_snapshot_t& cur) {
+size_t get_cycle_delta(const cqe_snapshot_t& prev, const cqe_snapshot_t& cur) {
   size_t prev_idx = prev.get_cqe_snapshot_cycle_idx();
   size_t cur_idx = cur.get_cqe_snapshot_cycle_idx();
-  assert(prev_idx < kCQESnapshotCycle && cur_idx < kCQESnapshotCycle);
+  assert(prev_idx < kAppCQESnapshotCycle && cur_idx < kAppCQESnapshotCycle);
 
-  return ((cur_idx + kCQESnapshotCycle) - prev_idx) % kCQESnapshotCycle;
+  return ((cur_idx + kAppCQESnapshotCycle) - prev_idx) % kAppCQESnapshotCycle;
 }
 
 void run_server(thread_params_t params) {
@@ -88,14 +88,24 @@ void run_server(thread_params_t params) {
 
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
-  auto* cqe_0 = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
+  auto* cqe_arr = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
 
-  // Initialize the CQE to the last CQE in the snapshot cycle
-  cqe_0->wqe_id = htons(std::numeric_limits<uint16_t>::max());
-  cqe_0->wqe_counter = htons(kAppStridesPerWQE - 1);
-  cqe_snapshot_t prev_snapshot;
-  snapshot_cqe(cqe_0, prev_snapshot);
-  assert(prev_snapshot.get_cqe_snapshot_cycle_idx() == kCQESnapshotCycle - 1);
+  // Initialize the CQEs as if we received the last (kAppRecvCQDepth) packets
+  // in the CQE cycle.
+  static_assert(kAppStridesPerWQE >= kAppRecvCQDepth, "");
+  for (size_t i = 0; i < kAppRecvCQDepth; i++) {
+    cqe_arr[i].wqe_id = htons(std::numeric_limits<uint16_t>::max());
+
+    // Last CQE gets
+    // * wqe_counter = (kAppStridesPerWQE - 1)
+    // * snapshot_cycle_idx = (kAppCQESnapshotCycle - 1)
+    cqe_arr[i].wqe_counter = htons(kAppStridesPerWQE - (kAppRecvCQDepth - i));
+
+    cqe_snapshot_t snapshot;
+    snapshot_cqe(&cqe_arr[i], snapshot);
+    rt_assert(snapshot.get_cqe_snapshot_cycle_idx() ==
+              kAppCQESnapshotCycle - (kAppRecvCQDepth - i));
+  }
 
   // The multi-packet RECVs. This must be done after we've initialized the CQE.
   struct ibv_sge sge[kAppRQDepth];
@@ -108,16 +118,20 @@ void run_server(thread_params_t params) {
   }
 
   printf("Thread %zu: Listening\n", thread_id);
-  size_t ring_head = 0, nb_rx = 0, nb_rx_rolling = 0, sge_idx = 0;
+  size_t ring_head = 0, nb_rx = 0, nb_rx_rolling = 0, sge_idx = 0, cqe_idx = 0;
   struct timespec start, end;
+
+  cqe_snapshot_t prev_snapshot;
+  snapshot_cqe(&cqe_arr[kAppRecvCQDepth - 1], prev_snapshot);
 
   clock_gettime(CLOCK_REALTIME, &start);
   while (true) {
     cqe_snapshot_t cur_snapshot;
-    snapshot_cqe(cqe_0, cur_snapshot);
+    snapshot_cqe(&cqe_arr[cqe_idx], cur_snapshot);
+    const size_t delta = get_cycle_delta(prev_snapshot, cur_snapshot);
+    if (delta == 0 || delta >= kAppNumRingEntries) continue;
 
-    const size_t num_comps = get_num_comps(prev_snapshot, cur_snapshot);
-    if (num_comps == 0) continue;
+    const size_t num_comps = delta;
 
     const size_t orig_ring_head = ring_head;
     for (size_t i = 0; i < num_comps; i++) {
@@ -146,6 +160,7 @@ void run_server(thread_params_t params) {
       assert(data_hdr->server_thread == thread_id);
       data_hdr->seq_num = 0;
 
+      mod_add_one<kAppNumRingEntries>(ring_head);
       ring_head = (ring_head + 1) % kAppNumRingEntries;
 
       nb_rx_rolling++;
@@ -162,6 +177,7 @@ void run_server(thread_params_t params) {
     }
 
     prev_snapshot = cur_snapshot;
+    mod_add_one<kAppRecvCQDepth>(cqe_idx);
     nb_rx += num_comps;
     if (nb_rx >= 1000000) {
       clock_gettime(CLOCK_REALTIME, &end);

@@ -34,6 +34,9 @@ static constexpr size_t kAppSQDepth = 128;
 static constexpr size_t kAppRQDepth = 4;  // Multi-packet RQ depth
 static_assert(is_power_of_two(kAppRQDepth), "");
 
+static constexpr size_t kAppRecvCQDepth = 8;  // The overrunning CQ
+static_assert(is_power_of_two(kAppRecvCQDepth), "");
+
 static constexpr size_t kAppLogNumStrides = 9;
 static constexpr size_t kAppLogStrideBytes = 10;
 
@@ -44,7 +47,7 @@ static constexpr size_t kAppRingMbufSize = (1ull << kAppLogStrideBytes);
 static constexpr size_t kAppStridesPerWQE = (1ull << kAppLogNumStrides);
 
 /// Packets after which the CQE snapshot cycles
-static constexpr size_t kCQESnapshotCycle = 65536 * kAppStridesPerWQE;
+static constexpr size_t kAppCQESnapshotCycle = 65536 * kAppStridesPerWQE;
 
 /// Total number of entries in the RX ring
 static constexpr size_t kAppNumRingEntries = (kAppStridesPerWQE * kAppRQDepth);
@@ -114,6 +117,7 @@ struct cqe_snapshot_t {
   }
 };
 
+/// Initialize a QP used for SENDs only
 void init_send_qp(ctrl_blk_t* cb) {
   assert(cb->context != nullptr && cb->pd != nullptr);
 
@@ -155,14 +159,15 @@ void init_send_qp(ctrl_blk_t* cb) {
   rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE) == 0);
 }
 
+/// Initialize a QP used for RECVs only
 void init_recv_qp(ctrl_blk_t* cb) {
   assert(cb->context != nullptr && cb->pd != nullptr);
 
   // Init CQ. Its size MUST be one so that we get two CQEs in mlx5.
   struct ibv_exp_cq_init_attr cq_init_attr;
   memset(&cq_init_attr, 0, sizeof(cq_init_attr));
-  cb->recv_cq =
-      ibv_exp_create_cq(cb->context, 1, nullptr, nullptr, 0, &cq_init_attr);
+  cb->recv_cq = ibv_exp_create_cq(cb->context, kAppRecvCQDepth, nullptr,
+                                  nullptr, 0, &cq_init_attr);
   assert(cb->recv_cq != nullptr);
 
   // Modify the RECV CQ to ignore overrun
