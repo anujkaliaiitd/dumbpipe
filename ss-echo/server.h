@@ -118,7 +118,7 @@ void ring_polling_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
     nb_post_send++;
     ret = ibv_post_send(cb->dgram_qp[qp_i], &wr[0], &bad_send_wr);
     rt_assert(ret == 0, "ibv_post_send error");
-    mod_add_one<kAppNumQPs>(qp_i);
+    qp_i = (qp_i + 1) % kAppNumQPs;
   }
 }
 
@@ -225,7 +225,7 @@ void cq_polling_server(thread_params_t* params, hrd_ctrl_blk_t* cb) {
     nb_post_send++;
     ret = ibv_post_send(cb->dgram_qp[qp_i], &wr[0], &bad_send_wr);
     rt_assert(ret == 0, "ibv_post_send error");
-    mod_add_one<kAppNumQPs>(qp_i);
+    qp_i = (qp_i + 1) % kAppNumQPs;
   }
 }
 

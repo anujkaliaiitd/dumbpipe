@@ -120,7 +120,7 @@ void run_server(thread_params_t params) {
     rt_assert(ret == 0, "ibv_post_recv() error " + std::to_string(ret));
 
     rolling_iter += static_cast<size_t>(num_comps);
-    mod_add_one<kAppNumQPs>(qp_i);
+    qp_i = (qp_i + 1) % kAppNumQPs;
   }
 }
 
@@ -217,7 +217,7 @@ void run_client(thread_params_t params) {
 
     int ret = ibv_post_send(cb->dgram_qp[0], &wr[0], &bad_send_wr);
     rt_assert(ret == 0, "ibv_post_send() error");
-    mod_add_one<kAppNumQPs>(qp_i);
+    qp_i = (qp_i + 1) % kAppNumQPs;
   }
 }
 
