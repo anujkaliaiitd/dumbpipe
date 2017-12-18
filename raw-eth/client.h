@@ -25,7 +25,7 @@ void run_client(thread_params_t params) {
   struct ibv_send_wr wr[kAppMaxPostlist], *bad_send_wr;
   struct ibv_sge sgl[kAppMaxPostlist];
   size_t rolling_iter = 0;  // For throughput measurement
-  size_t nb_tx = 0;
+  size_t nb_tx[kAppNumSQ] = {0}, qp_i = 0;
 
   struct timespec start, end;
   clock_gettime(CLOCK_REALTIME, &start);
@@ -61,10 +61,11 @@ void run_client(thread_params_t params) {
       wr[w_i].sg_list = &sgl[w_i];
 
       wr[w_i].send_flags = IBV_SEND_INLINE;
-      wr[w_i].send_flags |= nb_tx % kAppUnsigBatch == 0 ? IBV_SEND_SIGNALED : 0;
-      if (nb_tx % kAppUnsigBatch == kAppUnsigBatch - 1) {
+      wr[w_i].send_flags |=
+          nb_tx[qp_i] % kAppUnsigBatch == 0 ? IBV_SEND_SIGNALED : 0;
+      if (nb_tx[qp_i] % kAppUnsigBatch == kAppUnsigBatch - 1) {
         struct ibv_wc signal_wc;
-        hrd_poll_cq(cb->send_cq, 1, &signal_wc);
+        hrd_poll_cq(cb->send_cq[qp_i], 1, &signal_wc);
       }
 
       // Direct the packet to one of the receiver threads
@@ -83,10 +84,12 @@ void run_client(thread_params_t params) {
       sgl[w_i].lkey = 0;
 
       rolling_iter++;
-      nb_tx++;
+      nb_tx[qp_i]++;
     }
 
-    int ret = ibv_post_send(cb->send_qp, &wr[0], &bad_send_wr);
+    int ret = ibv_post_send(cb->send_qp[qp_i], &wr[0], &bad_send_wr);
+    qp_i = (qp_i + 1) % kAppNumSQ;
+
     rt_assert(ret == 0);
   }
 }

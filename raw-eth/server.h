@@ -160,7 +160,6 @@ void run_server(thread_params_t params) {
       assert(data_hdr->server_thread == thread_id);
       data_hdr->seq_num = 0;
 
-      mod_add_one<kAppNumRingEntries>(ring_head);
       ring_head = (ring_head + 1) % kAppNumRingEntries;
 
       nb_rx_rolling++;
@@ -177,8 +176,9 @@ void run_server(thread_params_t params) {
     }
 
     prev_snapshot = cur_snapshot;
-    mod_add_one<kAppRecvCQDepth>(cqe_idx);
+    cqe_idx = (cqe_idx + 1) % kAppRecvCQDepth;
     nb_rx += num_comps;
+
     if (nb_rx >= 1000000) {
       clock_gettime(CLOCK_REALTIME, &end);
       double sec = (end.tv_sec - start.tv_sec) +

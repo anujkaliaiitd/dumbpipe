@@ -30,6 +30,7 @@ static constexpr size_t kAppUnsigBatch = 64;
 
 static constexpr size_t kAppDeviceIndex = 2;
 
+static constexpr size_t kAppNumSQ = 4;  // Tweakme: The SEND QPs
 static constexpr size_t kAppSQDepth = 128;
 static constexpr size_t kAppRQDepth = 4;  // Multi-packet RQ depth
 static_assert(is_power_of_two(kAppRQDepth), "");
@@ -69,8 +70,8 @@ struct ctrl_blk_t {
   struct ibv_context* context;
   struct ibv_pd* pd;
 
-  struct ibv_qp* send_qp;
-  struct ibv_cq* send_cq;
+  struct ibv_qp* send_qp[kAppNumSQ];
+  struct ibv_cq* send_cq[kAppNumSQ];
 
   struct ibv_qp* recv_qp;
   struct ibv_cq* recv_cq;
@@ -117,46 +118,48 @@ struct cqe_snapshot_t {
   }
 };
 
-/// Initialize a QP used for SENDs only
-void init_send_qp(ctrl_blk_t* cb) {
+/// Initialize QPs used for SENDs only
+void init_send_qps(ctrl_blk_t* cb) {
   assert(cb->context != nullptr && cb->pd != nullptr);
 
-  struct ibv_exp_cq_init_attr cq_init_attr;
-  memset(&cq_init_attr, 0, sizeof(cq_init_attr));
-  cb->send_cq = ibv_exp_create_cq(cb->context, kAppSQDepth, nullptr, nullptr, 0,
-                                  &cq_init_attr);
-  assert(cb->send_cq != nullptr);
+  for (size_t i = 0; i < kAppNumSQ; i++) {
+    struct ibv_exp_cq_init_attr cq_init_attr;
+    memset(&cq_init_attr, 0, sizeof(cq_init_attr));
+    cb->send_cq[i] = ibv_exp_create_cq(cb->context, kAppSQDepth, nullptr,
+                                       nullptr, 0, &cq_init_attr);
+    assert(cb->send_cq[i] != nullptr);
 
-  struct ibv_exp_qp_init_attr qp_init_attr;
-  memset(&qp_init_attr, 0, sizeof(qp_init_attr));
-  qp_init_attr.comp_mask =
-      IBV_EXP_QP_INIT_ATTR_PD | IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS;
+    struct ibv_exp_qp_init_attr qp_init_attr;
+    memset(&qp_init_attr, 0, sizeof(qp_init_attr));
+    qp_init_attr.comp_mask =
+        IBV_EXP_QP_INIT_ATTR_PD | IBV_EXP_QP_INIT_ATTR_CREATE_FLAGS;
 
-  qp_init_attr.pd = cb->pd;
-  qp_init_attr.send_cq = cb->send_cq;
-  qp_init_attr.recv_cq = cb->send_cq;  // We won't post RECVs
-  qp_init_attr.cap.max_send_wr = kAppSQDepth;
-  qp_init_attr.cap.max_inline_data = 128;
-  qp_init_attr.qp_type = IBV_QPT_RAW_PACKET;
-  qp_init_attr.exp_create_flags |= IBV_EXP_QP_CREATE_SCATTER_FCS;
+    qp_init_attr.pd = cb->pd;
+    qp_init_attr.send_cq = cb->send_cq[i];
+    qp_init_attr.recv_cq = cb->send_cq[i];  // We won't post RECVs
+    qp_init_attr.cap.max_send_wr = kAppSQDepth;
+    qp_init_attr.cap.max_inline_data = 128;
+    qp_init_attr.qp_type = IBV_QPT_RAW_PACKET;
+    qp_init_attr.exp_create_flags |= IBV_EXP_QP_CREATE_SCATTER_FCS;
 
-  cb->send_qp = ibv_exp_create_qp(cb->context, &qp_init_attr);
-  assert(cb->send_qp != nullptr);
+    cb->send_qp[i] = ibv_exp_create_qp(cb->context, &qp_init_attr);
+    assert(cb->send_qp[i] != nullptr);
 
-  struct ibv_exp_qp_attr qp_attr;
-  memset(&qp_attr, 0, sizeof(qp_attr));
-  qp_attr.qp_state = IBV_QPS_INIT;
-  qp_attr.port_num = 1;
-  rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr,
-                              IBV_QP_STATE | IBV_QP_PORT) == 0);
+    struct ibv_exp_qp_attr qp_attr;
+    memset(&qp_attr, 0, sizeof(qp_attr));
+    qp_attr.qp_state = IBV_QPS_INIT;
+    qp_attr.port_num = 1;
+    rt_assert(ibv_exp_modify_qp(cb->send_qp[i], &qp_attr,
+                                IBV_QP_STATE | IBV_QP_PORT) == 0);
 
-  memset(&qp_attr, 0, sizeof(qp_attr));
-  qp_attr.qp_state = IBV_QPS_RTR;
-  rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE) == 0);
+    memset(&qp_attr, 0, sizeof(qp_attr));
+    qp_attr.qp_state = IBV_QPS_RTR;
+    rt_assert(ibv_exp_modify_qp(cb->send_qp[i], &qp_attr, IBV_QP_STATE) == 0);
 
-  memset(&qp_attr, 0, sizeof(qp_attr));
-  qp_attr.qp_state = IBV_QPS_RTS;
-  rt_assert(ibv_exp_modify_qp(cb->send_qp, &qp_attr, IBV_QP_STATE) == 0);
+    memset(&qp_attr, 0, sizeof(qp_attr));
+    qp_attr.qp_state = IBV_QPS_RTS;
+    rt_assert(ibv_exp_modify_qp(cb->send_qp[i], &qp_attr, IBV_QP_STATE) == 0);
+  }
 }
 
 /// Initialize a QP used for RECVs only
@@ -271,7 +274,7 @@ ctrl_blk_t* init_ctx(size_t device_index) {
   cb->pd = ibv_alloc_pd(cb->context);
   assert(cb->pd != nullptr);
 
-  init_send_qp(cb);
+  init_send_qps(cb);
   init_recv_qp(cb);
 
   return cb;
