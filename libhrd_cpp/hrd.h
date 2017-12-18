@@ -35,12 +35,6 @@ static constexpr size_t kHrdMaxLID = 256;
 static constexpr size_t kHrdQPNameSize = 200;
 static constexpr size_t kHrdMaxInline = 60;
 
-/// Optimized (x + 1) % N
-template <size_t N>
-static constexpr size_t mod_add_one(size_t x) {
-  return (x + 1) == N ? 0 : x + 1;
-}
-
 #define KB(x) (static_cast<size_t>(x) << 10)
 #define KB_(x) (KB(x) - 1)
 #define MB(x) (static_cast<size_t>(x) << 20)
