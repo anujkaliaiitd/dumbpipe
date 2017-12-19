@@ -79,6 +79,13 @@ void run_client(thread_params_t params) {
       data_hdr->server_thread = srv_thread_idx;
       data_hdr->seq_num = seq_num[srv_thread_idx]++;
 
+      if (kAppCheckContents) {
+        auto* buf = reinterpret_cast<uint8_t*>(&data_hdr[1]);
+        for (size_t i = 0; i < FLAGS_size - sizeof(data_hdr_t); i++) {
+          buf[i] = static_cast<uint8_t>(data_hdr->seq_num);
+        }
+      }
+
       sgl[w_i].addr = reinterpret_cast<uint64_t>(pkt_arr[w_i]);
       sgl[w_i].length = pkt_size;
       sgl[w_i].lkey = 0;

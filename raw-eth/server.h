@@ -148,6 +148,14 @@ void run_server(thread_params_t params) {
         throw std::runtime_error("CQE logic error");
       }
 
+      if (kAppCheckContents) {
+        auto* buf = reinterpret_cast<uint8_t*>(&data_hdr[1]);
+        printf("Expecting %u\n", static_cast<uint8_t>(data_hdr->seq_num));
+        for (size_t i = 0; i < FLAGS_size - sizeof(data_hdr_t); i++) {
+          rt_assert(buf[i] == static_cast<uint8_t>(data_hdr->seq_num));
+        }
+      }
+
       if (kAppVerbose) {
         printf(
             "Thread %zu: Buf %zu filled. Seq = %zu, nb_rx = %zu. "

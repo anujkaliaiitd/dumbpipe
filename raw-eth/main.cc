@@ -13,8 +13,10 @@ int main(int argc, char* argv[]) {
   rt_assert(FLAGS_is_client <= 1, "Invalid is_client");
   rt_assert(FLAGS_postlist >= 1 && FLAGS_postlist <= kAppMaxPostlist,
             "Invalid postlist");
+
+  // We need > sizeof(data_hdr_t) for buffer content checks
   rt_assert(FLAGS_size > 0 && FLAGS_size <= kHrdMaxInline &&
-                FLAGS_size >= sizeof(data_hdr_t),
+                FLAGS_size > sizeof(data_hdr_t),
             "Invalid transfer size");
 
   // More checks

@@ -33,12 +33,12 @@ struct udp_hdr_t {
   uint16_t src_port;
   uint16_t dst_port;
   uint16_t len;
-  uint16_t sum;
+  // uint16_t sum; - Ignore to make L2 + L3 + L4 header size = 40 bytes % 8 == 0
 } __attribute__((packed));
 
 static constexpr size_t kTotHdrSz =
     sizeof(eth_hdr_t) + sizeof(ipv4_hdr_t) + sizeof(udp_hdr_t);
-static_assert(kTotHdrSz == 42, "");
+static_assert(kTotHdrSz == 40, "");
 
 uint32_t ip_from_str(char* ip) {
   uint32_t addr;
@@ -89,7 +89,6 @@ void gen_udp_header(udp_hdr_t* udp_hdr, uint16_t src_port, uint16_t dst_port,
   udp_hdr->src_port = htons(src_port);
   udp_hdr->dst_port = htons(dst_port);
   udp_hdr->len = htons(sizeof(udp_hdr_t) + data_size);
-  udp_hdr->sum = 0;
 }
 
 #endif
