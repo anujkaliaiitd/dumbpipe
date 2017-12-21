@@ -5,8 +5,8 @@ void format_packet(uint8_t* buf) {
   gen_eth_header(reinterpret_cast<eth_hdr_t*>(buf), kAppSrcMAC, kAppDstMAC);
 
   buf += sizeof(eth_hdr_t);
-  uint32_t src_ip = ip_from_str(kAppSrcIP);
-  uint32_t dst_ip = ip_from_str(kAppDstIP);
+  uint32_t src_ip = ipv4_from_str(kAppSrcIP);
+  uint32_t dst_ip = ipv4_from_str(kAppDstIP);
   gen_ipv4_header(reinterpret_cast<ipv4_hdr_t*>(buf), src_ip, dst_ip,
                   FLAGS_size);
 
@@ -36,6 +36,8 @@ void run_client(thread_params_t params) {
     memset(pkt_arr[i], 0, pkt_size);
     format_packet(pkt_arr[i]);
   }
+
+  printf("Packet header = %s\n", frame_header_to_string(pkt_arr[0]).c_str());
 
   std::vector<size_t> seq_num(FLAGS_num_server_threads);
   for (auto& s : seq_num) s = 1;
