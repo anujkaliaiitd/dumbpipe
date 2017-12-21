@@ -70,6 +70,7 @@ size_t get_cycle_delta(const cqe_snapshot_t& prev, const cqe_snapshot_t& cur) {
 void run_server(thread_params_t params) {
   size_t thread_id = params.id;
   ctrl_blk_t* cb = init_ctx(kAppDeviceIndex);
+  printf("Device = %s\n", cb->ib_dev->name);
 
   uint16_t dst_port = static_cast<uint16_t>(kBaseDstPort + thread_id);
   printf("Thread %zu listening on port %u\n", thread_id, dst_port);
