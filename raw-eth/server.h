@@ -1,6 +1,7 @@
 #include "barrier.h"
 #include "main.h"
 #include "mlx5_defs.h"
+#include <cmath>
 
 // Install a UDP destination port--based flow rule
 void install_flow_rule(struct ibv_qp* qp, uint16_t dst_port) {
@@ -89,6 +90,10 @@ void run_server(thread_params_t params) {
 
   // This cast works for mlx5 where ibv_cq is the first member of mlx5_cq.
   auto* _mlx5_cq = reinterpret_cast<mlx5_cq*>(cb->recv_cq);
+  rt_assert(kAppRecvCQDepth == std::pow(2, _mlx5_cq->cq_log_size),
+            "mlx5 CQ depth does not match kAppRecvCQDepth");
+  rt_assert(_mlx5_cq->buf_a.buf != nullptr);
+
   auto* cqe_arr = reinterpret_cast<volatile mlx5_cqe64*>(_mlx5_cq->buf_a.buf);
 
   // Initialize the CQEs as if we received the last (kAppRecvCQDepth) packets

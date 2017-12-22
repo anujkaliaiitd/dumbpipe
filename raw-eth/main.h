@@ -36,8 +36,10 @@ static constexpr size_t kAppSQDepth = 128;
 static constexpr size_t kAppRQDepth = 4;  // Multi-packet RQ depth
 static_assert(is_power_of_two(kAppRQDepth), "");
 
-static constexpr size_t kAppRecvCQDepth = 8;  // Tweakme: The overrunning CQ
-static_assert(is_power_of_two(kAppRecvCQDepth), "");
+/// The CQ size allocated by the mlx5 driver. We request a CQ of half this size
+/// and the mlx5 driver doubles it.
+static constexpr size_t kAppRecvCQDepth = 8; 
+static_assert(kAppRecvCQDepth >= 2 && is_power_of_two(kAppRecvCQDepth), "");
 
 static constexpr size_t kAppLogNumStrides = 9;
 static constexpr size_t kAppLogStrideBytes = 10;
@@ -72,7 +74,7 @@ uint8_t kAppSrcMAC[6] = {0xec, 0x0d, 0x9a, 0x7b, 0xd7, 0xe6};
 char kAppSrcIP[] = "192.168.1.251";
 
 // Server thread i uses UDP port (kBaseDstPort + i)
-static constexpr uint16_t kBaseDstPort = 3185;
+static constexpr uint16_t kBaseDstPort = 31852;
 
 struct ctrl_blk_t {
   struct ibv_device* ib_dev;
@@ -178,7 +180,7 @@ void init_recv_qp(ctrl_blk_t* cb) {
   // Init CQ. Its size MUST be one so that we get two CQEs in mlx5.
   struct ibv_exp_cq_init_attr cq_init_attr;
   memset(&cq_init_attr, 0, sizeof(cq_init_attr));
-  cb->recv_cq = ibv_exp_create_cq(cb->context, kAppRecvCQDepth, nullptr,
+  cb->recv_cq = ibv_exp_create_cq(cb->context, kAppRecvCQDepth / 2, nullptr,
                                   nullptr, 0, &cq_init_attr);
   assert(cb->recv_cq != nullptr);
 
