@@ -29,7 +29,7 @@ static constexpr bool kAppCheckContents = false;  // Check buffer contents
 static constexpr size_t kAppMaxPostlist = 64;
 static constexpr size_t kAppUnsigBatch = 64;
 
-static constexpr size_t kAppDeviceIndex = 2;
+static constexpr size_t kAppDeviceIndex = 1;
 
 static constexpr size_t kAppNumSQ = 1;  // Tweakme: The SEND QPs
 static constexpr size_t kAppSQDepth = 128;
